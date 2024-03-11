@@ -122,11 +122,11 @@ int main(void)
 	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
 	  HAL_Delay(1000);
 	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
-	  printf("mfg id: %04x\t%04x\r\n", data[0], data[1]);
+	  printf("mfg id: %04x\t%04x\r\n", data[0], data[1]); // expect 0x5449
 	  data[0] = 0;
 	  data[1] = 0;
 	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), dieID, 1, data, 2, HAL_MAX_DELAY);
-	  printf("die id: %04x\t%04x\r\n", data[0], data[1]);
+	  printf("die id: %04x\t%04x\r\n", data[0], data[1]); //expect 0x2770
 
 	  data[0] = 0;
 	  data[1] = 0;
