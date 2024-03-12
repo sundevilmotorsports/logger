@@ -18,10 +18,14 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
+
+#include "usbd_cdc_if.h"
+#include "string.h"
 //#include <GNSS.h>
 /* USER CODE END Includes */
 
@@ -44,6 +48,8 @@
 
 I2C_HandleTypeDef hi2c4;
 
+SPI_HandleTypeDef hspi4;
+
 UART_HandleTypeDef huart9;
 
 /* USER CODE BEGIN PV */
@@ -55,6 +61,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_UART9_Init(void);
 static void MX_I2C4_Init(void);
+static void MX_SPI4_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -105,6 +112,8 @@ int main(void)
   MX_GPIO_Init();
   MX_UART9_Init();
   MX_I2C4_Init();
+  MX_SPI4_Init();
+  MX_USB_DEVICE_Init();
   /* USER CODE BEGIN 2 */
   //GNSS_Init(&GNSS_Handle, &huart9);
   //HAL_Delay(1000);
@@ -117,20 +126,47 @@ int main(void)
   uint16_t mfgID = 0xfe;
   uint16_t dieID = 0xff;
   uint8_t data[2];
+  data[0] = 0;
+  data[1] = 0;
+  uint16_t channel = 0;
+  uint8_t ain4 = 0b100 << 3;
+  uint8_t buf[4];
+  uint8_t br = 0;
+  char msg[100];
+  printf("start\n");
+  int hehe = 0;
   while (1)
   {
-	  HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
-	  HAL_Delay(1000);
-	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
-	  printf("mfg id: %04x\t%04x\r\n", data[0], data[1]); // expect 0x5449
-	  data[0] = 0;
-	  data[1] = 0;
-	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), dieID, 1, data, 2, HAL_MAX_DELAY);
-	  printf("die id: %04x\t%04x\r\n", data[0], data[1]); //expect 0x2770
+	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
+	  //HAL_Delay(100);
+	  //HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
+	  //printf("mfg id: %04x\t%04x\r\n", data[0], data[1]); // expect 0x5449
+	  //data[0] = 0;
+	  //data[1] = 0;
+	  //HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), dieID, 1, data, 2, HAL_MAX_DELAY);
+	  //printf("die id: %04x\t%04x\r\n", data[0], data[1]); //expect 0x2770
 
-	  data[0] = 0;
-	  data[1] = 0;
+	  //data[0] = 0;
+	  //data[1] = 0;
+	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
+	  HAL_SPI_Transmit(&hspi4, &ain4, 1, HAL_MAX_DELAY);
+	  HAL_Delay(1);
+	  HAL_SPI_Receive(&hspi4, data, 2, HAL_MAX_DELAY);
+	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
+	  channel = data[1] << 8 | data[0]; // TODO do some thonking
+	  //printf("%d\n", channel);
 
+
+	  sprintf(msg, "%d\r\n", channel);
+	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+
+	  if(channel >= 2000) {
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+	  }
+	  else {
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	  }
+	  HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -160,14 +196,15 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI48|RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSI48State = RCC_HSI48_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
   RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 2;
   RCC_OscInitStruct.PLL.PLLN = 44;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 2;
+  RCC_OscInitStruct.PLL.PLLQ = 5;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -245,6 +282,54 @@ static void MX_I2C4_Init(void)
 }
 
 /**
+  * @brief SPI4 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI4_Init(void)
+{
+
+  /* USER CODE BEGIN SPI4_Init 0 */
+
+  /* USER CODE END SPI4_Init 0 */
+
+  /* USER CODE BEGIN SPI4_Init 1 */
+
+  /* USER CODE END SPI4_Init 1 */
+  /* SPI4 parameter configuration*/
+  hspi4.Instance = SPI4;
+  hspi4.Init.Mode = SPI_MODE_MASTER;
+  hspi4.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi4.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi4.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi4.Init.CLKPhase = SPI_PHASE_2EDGE;
+  hspi4.Init.NSS = SPI_NSS_SOFT;
+  hspi4.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_4;
+  hspi4.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi4.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi4.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi4.Init.CRCPolynomial = 0x0;
+  hspi4.Init.NSSPMode = SPI_NSS_PULSE_ENABLE;
+  hspi4.Init.NSSPolarity = SPI_NSS_POLARITY_LOW;
+  hspi4.Init.FifoThreshold = SPI_FIFO_THRESHOLD_01DATA;
+  hspi4.Init.TxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi4.Init.RxCRCInitializationPattern = SPI_CRC_INITIALIZATION_ALL_ZERO_PATTERN;
+  hspi4.Init.MasterSSIdleness = SPI_MASTER_SS_IDLENESS_00CYCLE;
+  hspi4.Init.MasterInterDataIdleness = SPI_MASTER_INTERDATA_IDLENESS_00CYCLE;
+  hspi4.Init.MasterReceiverAutoSusp = SPI_MASTER_RX_AUTOSUSP_DISABLE;
+  hspi4.Init.MasterKeepIOState = SPI_MASTER_KEEP_IO_STATE_DISABLE;
+  hspi4.Init.IOSwap = SPI_IO_SWAP_DISABLE;
+  if (HAL_SPI_Init(&hspi4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI4_Init 2 */
+
+  /* USER CODE END SPI4_Init 2 */
+
+}
+
+/**
   * @brief UART9 Initialization Function
   * @param None
   * @retval None
@@ -304,13 +389,17 @@ static void MX_GPIO_Init(void)
 /* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
+  __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
 
   /*Configure GPIO pin : PB12 */
   GPIO_InitStruct.Pin = GPIO_PIN_12;
@@ -318,6 +407,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PE1 */
+  GPIO_InitStruct.Pin = GPIO_PIN_1;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
 /* USER CODE BEGIN MX_GPIO_Init_2 */
 /* USER CODE END MX_GPIO_Init_2 */
