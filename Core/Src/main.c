@@ -149,7 +149,7 @@ int main(void)
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 
   uint32_t wbytes;
-  uint8_t cavalry = 169;
+  uint8_t lemon = 127;
 
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
@@ -157,18 +157,15 @@ int main(void)
 	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
 	  if(res != FR_OK)
 	  {
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 		  Error_Handler();
 	  }
-	  if(f_open(&file, (TCHAR const*) "tall.benji", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK)
-	  {
+  }
 
-		  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
-		  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
-		  if(f_write(&file, &cavalry, sizeof(cavalry), &wbytes) == FR_OK) {
-			  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-		  }
-		  f_close(&file);
-	  }
+  if(f_open(&file, (TCHAR const*) "data5.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  {
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	  Error_Handler();
   }
 
   while (1)
@@ -184,6 +181,7 @@ int main(void)
 
 	  //data[0] = 0;
 	  //data[1] = 0;
+	  /*
 	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
 	  HAL_SPI_Transmit(&hspi4, &ain4, 1, HAL_MAX_DELAY);
 	  HAL_Delay(1);
@@ -195,14 +193,22 @@ int main(void)
 
 	  sprintf(msg, "%d\r\n", channel);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+	  */
 
-	  if(!HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
-		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
-	  }
-	  else {
+	  // write to file every loop
+	  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
+	  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
+	  uint32_t time = HAL_GetTick();
+	  uint8_t hehez[4];
+	  hehez[0] = (time & 0xFF000000) >> 24;
+	  hehez[1] = (time & 0x00FF0000) >> 16;
+	  hehez[2] = (time & 0x0000FF00) >> 8;
+	  hehez[3] = time & 0x000000FF;
+	  if(f_write(&file, &hehez, sizeof(hehez), &wbytes) == FR_OK) {
 		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  }
-	  HAL_Delay(100);
+	  f_sync(&file);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
