@@ -162,7 +162,7 @@ int main(void)
 	  }
   }
 
-  if(f_open(&file, (TCHAR const*) "data5.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  if(f_open(&file, (TCHAR const*) "data6.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
   {
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  Error_Handler();
