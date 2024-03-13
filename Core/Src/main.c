@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 #include "usb_device.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -48,12 +49,17 @@
 
 I2C_HandleTypeDef hi2c4;
 
+SD_HandleTypeDef hsd1;
+
 SPI_HandleTypeDef hspi4;
 
 UART_HandleTypeDef huart9;
 
 /* USER CODE BEGIN PV */
-
+FATFS fatFS;
+FIL file;
+char diskPath[4];
+uint8_t rtext[_MAX_SS];/* File read buffer */
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,6 +68,7 @@ static void MX_GPIO_Init(void);
 static void MX_UART9_Init(void);
 static void MX_I2C4_Init(void);
 static void MX_SPI4_Init(void);
+static void MX_SDMMC1_SD_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -114,7 +121,10 @@ int main(void)
   MX_I2C4_Init();
   MX_SPI4_Init();
   MX_USB_DEVICE_Init();
+  MX_SDMMC1_SD_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  BSP_SD_Init();
   //GNSS_Init(&GNSS_Handle, &huart9);
   //HAL_Delay(1000);
   //GNSS_LoadConfig(&GNSS_Handle);
@@ -135,6 +145,32 @@ int main(void)
   char msg[100];
   printf("start\n");
   int hehe = 0;
+
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+
+  uint32_t wbytes;
+  uint8_t cavalry = 169;
+
+
+  if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
+  {
+	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
+	  if(res != FR_OK)
+	  {
+		  Error_Handler();
+	  }
+	  if(f_open(&file, (TCHAR const*) "tall.benji", FA_CREATE_ALWAYS | FA_WRITE) == FR_OK)
+	  {
+
+		  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
+		  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
+		  if(f_write(&file, &cavalry, sizeof(cavalry), &wbytes) == FR_OK) {
+			  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+		  }
+		  f_close(&file);
+	  }
+  }
+
   while (1)
   {
 	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
@@ -160,11 +196,11 @@ int main(void)
 	  sprintf(msg, "%d\r\n", channel);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
-	  if(channel >= 2000) {
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+	  if(!HAL_GPIO_ReadPin(GPIOD, GPIO_PIN_3)) {
+		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 	  }
 	  else {
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  }
 	  HAL_Delay(100);
     /* USER CODE END WHILE */
@@ -204,7 +240,7 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.PLL.PLLM = 2;
   RCC_OscInitStruct.PLL.PLLN = 44;
   RCC_OscInitStruct.PLL.PLLP = 1;
-  RCC_OscInitStruct.PLL.PLLQ = 5;
+  RCC_OscInitStruct.PLL.PLLQ = 11;
   RCC_OscInitStruct.PLL.PLLR = 2;
   RCC_OscInitStruct.PLL.PLLRGE = RCC_PLL1VCIRANGE_3;
   RCC_OscInitStruct.PLL.PLLVCOSEL = RCC_PLL1VCOWIDE;
@@ -278,6 +314,33 @@ static void MX_I2C4_Init(void)
   /* USER CODE BEGIN I2C4_Init 2 */
 
   /* USER CODE END I2C4_Init 2 */
+
+}
+
+/**
+  * @brief SDMMC1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SDMMC1_SD_Init(void)
+{
+
+  /* USER CODE BEGIN SDMMC1_Init 0 */
+
+  /* USER CODE END SDMMC1_Init 0 */
+
+  /* USER CODE BEGIN SDMMC1_Init 1 */
+
+  /* USER CODE END SDMMC1_Init 1 */
+  hsd1.Instance = SDMMC1;
+  hsd1.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+  hsd1.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_ENABLE;
+  hsd1.Init.BusWide = SDMMC_BUS_WIDE_4B;
+  hsd1.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_ENABLE;
+  hsd1.Init.ClockDiv = 1;
+  /* USER CODE BEGIN SDMMC1_Init 2 */
+  HAL_SD_Init(&hsd1);
+  /* USER CODE END SDMMC1_Init 2 */
 
 }
 
@@ -393,6 +456,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
@@ -407,6 +471,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PD3 */
+  GPIO_InitStruct.Pin = GPIO_PIN_3;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PE1 */
   GPIO_InitStruct.Pin = GPIO_PIN_1;
