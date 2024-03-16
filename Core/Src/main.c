@@ -178,15 +178,21 @@ int main(void)
   {
 	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
 	  //HAL_Delay(100);
-	  //HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
+	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
+	  uint8_t id = data[0];
+	  uint8_t idl = data[1];
 	  //printf("mfg id: %04x\t%04x\r\n", data[0], data[1]); // expect 0x5449
 	  //data[0] = 0;
 	  //data[1] = 0;
 	  //HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), dieID, 1, data, 2, HAL_MAX_DELAY);
 	  //printf("die id: %04x\t%04x\r\n", data[0], data[1]); //expect 0x2770
 
-	  //data[0] = 0;
-	  //data[1] = 0;
+	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), 0x02, 1, data, 2, 1000);
+	  uint16_t volt = data[0] << 8 | data[1];
+	  uint16_t oof = data[1] << 8 | data[0];
+
+	  data[0] = 0;
+	  data[1] = 0;
 
 	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
 	  HAL_SPI_Transmit(&hspi4, &ain4, 1, HAL_MAX_DELAY);
@@ -197,10 +203,10 @@ int main(void)
 	  //printf("%d\n", channel);
 
 
-	  sprintf(msg, "AIN2: %d\r\n", channel);
+	  sprintf(msg, "AIN2: %d\tvolt: %d\toof volt: %d\tmfg ID: %04x%04x\r\n", channel, volt, oof, id, idl);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
-
+	  HAL_Delay(2);
 	  // write to file every loop
 	  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
 	  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
