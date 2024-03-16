@@ -27,7 +27,7 @@
 
 #include "usbd_cdc_if.h"
 #include "string.h"
-//#include <GNSS.h>
+#include <GNSS.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,21 +54,25 @@ SD_HandleTypeDef hsd1;
 SPI_HandleTypeDef hspi4;
 
 UART_HandleTypeDef huart9;
+DMA_HandleTypeDef hdma_uart9_rx;
+DMA_HandleTypeDef hdma_uart9_tx;
 
 /* USER CODE BEGIN PV */
 FATFS fatFS;
 FIL file;
 char diskPath[4];
 uint8_t rtext[_MAX_SS];/* File read buffer */
+//GNSS_StateHandle gps;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
-static void MX_UART9_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C4_Init(void);
 static void MX_SPI4_Init(void);
 static void MX_SDMMC1_SD_Init(void);
+static void MX_UART9_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -117,16 +121,17 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
-  MX_UART9_Init();
+  MX_DMA_Init();
   MX_I2C4_Init();
   MX_SPI4_Init();
   MX_USB_DEVICE_Init();
   MX_SDMMC1_SD_Init();
+  MX_UART9_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
-  //GNSS_Init(&GNSS_Handle, &huart9);
-  //HAL_Delay(1000);
+  GNSS_Init(&GNSS_Handle, &huart9);
+  HAL_Delay(1000);
   //GNSS_LoadConfig(&GNSS_Handle);
   /* USER CODE END 2 */
 
@@ -139,7 +144,7 @@ int main(void)
   data[0] = 0;
   data[1] = 0;
   uint16_t channel = 0;
-  uint8_t ain4 = 0b100 << 3;
+  uint8_t ain4 = 0b010 << 3;
   uint8_t buf[4];
   uint8_t br = 0;
   char msg[100];
@@ -147,6 +152,7 @@ int main(void)
   int hehe = 0;
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
+  uint32_t Timer = HAL_GetTick();
 
   uint32_t wbytes;
   uint8_t lemon = 127;
@@ -162,7 +168,7 @@ int main(void)
 	  }
   }
 
-  if(f_open(&file, (TCHAR const*) "data8.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  if(f_open(&file, (TCHAR const*) "data10.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
   {
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  Error_Handler();
@@ -181,7 +187,7 @@ int main(void)
 
 	  //data[0] = 0;
 	  //data[1] = 0;
-	  /*
+
 	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
 	  HAL_SPI_Transmit(&hspi4, &ain4, 1, HAL_MAX_DELAY);
 	  HAL_Delay(1);
@@ -191,9 +197,9 @@ int main(void)
 	  //printf("%d\n", channel);
 
 
-	  sprintf(msg, "%d\r\n", channel);
+	  sprintf(msg, "AIN2: %d\r\n", channel);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-	  */
+
 
 	  // write to file every loop
 	  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
@@ -209,6 +215,23 @@ int main(void)
 	  }
 	  f_sync(&file);
 
+/*
+		if ((HAL_GetTick() - Timer) > 1000) {
+			GNSS_GetUniqID(&GNSS_Handle);
+			GNSS_ParseBuffer(&GNSS_Handle);
+			HAL_Delay(250);
+			GNSS_GetPVTData(&GNSS_Handle);
+			GNSS_ParseBuffer(&GNSS_Handle);
+
+			sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tID: %04x%04x%04x%04x\r\n", GNSS_Handle.fixType,
+					GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+					GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+					GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1], GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3]
+					);
+			CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			Timer = HAL_GetTick();
+		}
+		*/
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -414,7 +437,7 @@ static void MX_UART9_Init(void)
 
   /* USER CODE END UART9_Init 1 */
   huart9.Instance = UART9;
-  huart9.Init.BaudRate = 38400;
+  huart9.Init.BaudRate = 9600;
   huart9.Init.WordLength = UART_WORDLENGTH_8B;
   huart9.Init.StopBits = UART_STOPBITS_1;
   huart9.Init.Parity = UART_PARITY_NONE;
@@ -443,6 +466,25 @@ static void MX_UART9_Init(void)
   /* USER CODE BEGIN UART9_Init 2 */
 
   /* USER CODE END UART9_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
+  /* DMA1_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 
 }
 

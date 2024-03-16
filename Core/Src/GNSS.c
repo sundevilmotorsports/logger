@@ -33,6 +33,8 @@ union i_Short iShort;
 union u_Long uLong;
 union i_Long iLong;
 
+GNSS_StateHandle GNSS_Handle;
+
 /*!
  * Structure initialization.
  * @param GNSS Pointer to main GNSS structure.
