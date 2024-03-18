@@ -24,10 +24,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "stdio.h"
-
 #include "usbd_cdc_if.h"
 #include "string.h"
+
 #include <GNSS.h>
+#include "adc.h"
+#include "ina260.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -63,6 +65,8 @@ FIL file;
 char diskPath[4];
 uint8_t rtext[_MAX_SS];/* File read buffer */
 //GNSS_StateHandle gps;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -137,25 +141,17 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t ina260id = 0b1000000;
-  uint16_t mfgID = 0xfe;
-  uint16_t dieID = 0xff;
   uint8_t data[2];
   data[0] = 0;
   data[1] = 0;
   uint16_t channel = 0;
-  uint8_t ain4 = 0b010 << 3;
-  uint8_t buf[4];
-  uint8_t br = 0;
   char msg[100];
   printf("start\n");
-  int hehe = 0;
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
   uint32_t Timer = HAL_GetTick();
 
   uint32_t wbytes;
-  uint8_t lemon = 127;
 
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
@@ -176,34 +172,8 @@ int main(void)
 
   while (1)
   {
-	  //HAL_GPIO_TogglePin(GPIOB, GPIO_PIN_12);
-	  //HAL_Delay(100);
-	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), mfgID, 1, data, 2, HAL_MAX_DELAY);
-	  uint8_t id = data[0];
-	  uint8_t idl = data[1];
-	  //printf("mfg id: %04x\t%04x\r\n", data[0], data[1]); // expect 0x5449
-	  //data[0] = 0;
-	  //data[1] = 0;
-	  //HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), dieID, 1, data, 2, HAL_MAX_DELAY);
-	  //printf("die id: %04x\t%04x\r\n", data[0], data[1]); //expect 0x2770
 
-	  HAL_I2C_Mem_Read(&hi2c4, (ina260id << 1 | 1), 0x02, 1, data, 2, 1000);
-	  uint16_t volt = data[0] << 8 | data[1];
-	  uint16_t oof = data[1] << 8 | data[0];
-
-	  data[0] = 0;
-	  data[1] = 0;
-
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_RESET);
-	  HAL_SPI_Transmit(&hspi4, &ain4, 1, HAL_MAX_DELAY);
-	  HAL_Delay(1);
-	  HAL_SPI_Receive(&hspi4, data, 2, HAL_MAX_DELAY);
-	  HAL_GPIO_WritePin(GPIOE, GPIO_PIN_1, GPIO_PIN_SET);
-	  channel = data[1] << 8 | data[0]; // TODO do some thonking
-	  //printf("%d\n", channel);
-
-
-	  sprintf(msg, "AIN2: %d\tvolt: %d\toof volt: %d\tmfg ID: %04x%04x\r\n", channel, volt, oof, id, idl);
+	  sprintf(msg, "AIN2: %d\r\n", channel);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
 	  HAL_Delay(2);
