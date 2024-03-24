@@ -64,8 +64,29 @@ FATFS fatFS;
 FIL file;
 char diskPath[4];
 uint8_t rtext[_MAX_SS];/* File read buffer */
+
 //GNSS_StateHandle gps;
 
+
+enum LogChannel {
+	TS, TS1, TS2, TS3, // timestamp (ms)
+	F_BRAKEPRESSURE, F_BRAKEPRESSURE1, // front brake pressure
+	R_BRAKEPRESSURE, R_BRAKEPRESSURE1, // rear brake pressure
+	STEERING, STEERING1, // steering pot
+	FRSHOCK, FRSHOCK1,
+	FLSHOCK, FLSHOCK1,
+	RLSHOCK, RLSHOCK1,
+	RRSHOCK, RRSHOCK1,
+	CURRENT, CURRENT1,
+	BATTERY, BATTERY1,
+	// gps
+	// gps
+	// gps fix
+
+	CH_COUNT
+};
+
+uint8_t logBuffer[CH_COUNT];
 
 /* USER CODE END PV */
 
