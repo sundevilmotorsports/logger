@@ -8,6 +8,9 @@
 #ifndef INC_LOGGER_H_
 #define INC_LOGGER_H_
 
+#include <stdint.h>
+#include <stddef.h>
+
 void loggerEmplaceU16(uint8_t* buffer, size_t addr, uint16_t data);
 void loggerEmplaceU32(uint8_t* buffer, size_t addr, uint32_t data);
 void loggerEmplaceCAN(uint8_t* buffer, size_t addr, uint8_t* msg);

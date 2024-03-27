@@ -30,6 +30,7 @@
 #include <GNSS.h>
 #include "adc.h"
 #include "ina260.h"
+#include "eeprom.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -49,6 +50,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 
+I2C_HandleTypeDef hi2c2;
 I2C_HandleTypeDef hi2c4;
 
 SD_HandleTypeDef hsd1;
@@ -98,6 +100,7 @@ static void MX_I2C4_Init(void);
 static void MX_SPI4_Init(void);
 static void MX_SDMMC1_SD_Init(void);
 static void MX_UART9_Init(void);
+static void MX_I2C2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
@@ -153,6 +156,7 @@ int main(void)
   MX_SDMMC1_SD_Init();
   MX_UART9_Init();
   MX_FATFS_Init();
+  MX_I2C2_Init();
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
   GNSS_Init(&GNSS_Handle, &huart9);
@@ -174,6 +178,11 @@ int main(void)
 
   uint32_t wbytes;
 
+  //uint8_t drake = 0;
+  //HAL_StatusTypeDef ret = HAL_ERROR;
+  //ret = eepromWrite(&hi2c2, 4, &drake);
+  //ret = eepromRead(&hi2c2, 4, &drake);
+
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
   {
@@ -191,8 +200,13 @@ int main(void)
 	  Error_Handler();
   }
 
+
+
   while (1)
   {
+	  //adcEnable();
+
+	  //adcDisable();
 
 	  sprintf(msg, "AIN2: %d\r\n", channel);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -293,6 +307,54 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.Timing = 0x60404E72;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Analogue filter
+  */
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configure Digital filter
+  */
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c2, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
+
 }
 
 /**
