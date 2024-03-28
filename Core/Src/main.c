@@ -172,17 +172,24 @@ int main(void)
   data[1] = 0;
   uint16_t channel = 0;
   char msg[100];
-  printf("start\n");
+  char name[16];
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
-  uint32_t Timer = HAL_GetTick();
+  //uint32_t Timer = HAL_GetTick();
 
-  uint32_t wbytes;
+  UINT wbytes; // unsigned int
 
-  //uint8_t drake = 0;
-  //HAL_StatusTypeDef ret = HAL_ERROR;
-  //ret = eepromWrite(&hi2c2, 4, &drake);
-  //ret = eepromRead(&hi2c2, 4, &drake);
+  uint8_t runNo = 0;
+  HAL_StatusTypeDef ret = HAL_ERROR;
+  uint16_t runNoAddr = 4;
+  ret = eepromRead(&hi2c2, runNoAddr, &runNo);
+
+  sprintf(name, "data%d.benji", runNo);
+  if(++runNo == 255) {
+	  runNo = 0;
+  }
+  eepromWrite(&hi2c2, runNoAddr, &runNo);
+
 
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
@@ -195,7 +202,7 @@ int main(void)
 	  }
   }
 
-  if(f_open(&file, (TCHAR const*) "data10.benji", FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
   {
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  Error_Handler();
@@ -209,25 +216,29 @@ int main(void)
 	  adcEnable();
 	  fbp = getAnalog(&hspi4, ADC_FBP);
 	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fbp);
+	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, getAnalog(&hspi4, ADC_RBP));
+	  loggerEmplaceU16(logBuffer, STEERING, getAnalog(&hspi4, ADC_STP));
 	  loggerEmplaceU16(logBuffer, FLSHOCK, getAnalog(&hspi4, ADC_FLS));
+	  loggerEmplaceU16(logBuffer, FRSHOCK, getAnalog(&hspi4, ADC_FRS));
+	  loggerEmplaceU16(logBuffer, RRSHOCK, getAnalog(&hspi4, ADC_RRS));
+	  loggerEmplaceU16(logBuffer, RLSHOCK, getAnalog(&hspi4, ADC_RLS));
 	  adcDisable();
 
-	  uint32_t time = HAL_GetTick();
-	  loggerEmplaceU32(logBuffer, TS, time);
+	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
+	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
+
 
 	  sprintf(msg, "AIN2: %d\r\n", fbp);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
-	  HAL_Delay(2);
-	  // write to file every loop
-	  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
-	  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
-	  /*
-	  */
-	  //if(f_write(&file, &hehez, sizeof(hehez), &wbytes) == FR_OK) {
+
+	  uint32_t time = HAL_GetTick();
+	  loggerEmplaceU32(logBuffer, TS, time);
+	  //HAL_Delay(2);
+	  if(f_write(&file, &logBuffer, sizeof(logBuffer), &wbytes) == FR_OK) {
 		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	  //}
-	  //f_sync(&file);
+	  }
+	  f_sync(&file);
 
 /*
 		if ((HAL_GetTick() - Timer) > 1000) {
