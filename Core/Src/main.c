@@ -31,6 +31,7 @@
 #include "adc.h"
 #include "ina260.h"
 #include "eeprom.h"
+#include "logger.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -204,27 +205,27 @@ int main(void)
 
   while (1)
   {
-	  //adcEnable();
+	  adcEnable();
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, getAnalog(&hspi4, ADC_FBP));
+	  loggerEmplaceU16(logBuffer, FLSHOCK, getAnalog(&hspi4, ADC_FLS));
+	  adcDisable();
 
-	  //adcDisable();
+	  uint32_t time = HAL_GetTick();
+	  loggerEmplaceU32(logBuffer, TS, time);
 
-	  sprintf(msg, "AIN2: %d\r\n", channel);
+	  sprintf(msg, "AIN2: %d\r\n", getAnalog(&hspi4, ADC_STP));
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
 	  HAL_Delay(2);
 	  // write to file every loop
 	  //if(f_printf(&file, "hehehe") == FR_OK); // inefficient
 	  //sprintf(msg, "hehez"); // can use sprintf w/ f_write
-	  uint32_t time = HAL_GetTick();
-	  uint8_t hehez[4];
-	  hehez[0] = (time & 0xFF000000) >> 24;
-	  hehez[1] = (time & 0x00FF0000) >> 16;
-	  hehez[2] = (time & 0x0000FF00) >> 8;
-	  hehez[3] = time & 0x000000FF;
-	  if(f_write(&file, &hehez, sizeof(hehez), &wbytes) == FR_OK) {
+	  /*
+	  */
+	  //if(f_write(&file, &hehez, sizeof(hehez), &wbytes) == FR_OK) {
 		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	  }
-	  f_sync(&file);
+	  //}
+	  //f_sync(&file);
 
 /*
 		if ((HAL_GetTick() - Timer) > 1000) {
