@@ -205,15 +205,17 @@ int main(void)
 
   while (1)
   {
+	  uint16_t fbp = 0;
 	  adcEnable();
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, getAnalog(&hspi4, ADC_FBP));
+	  fbp = getAnalog(&hspi4, ADC_FBP);
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fbp);
 	  loggerEmplaceU16(logBuffer, FLSHOCK, getAnalog(&hspi4, ADC_FLS));
 	  adcDisable();
 
 	  uint32_t time = HAL_GetTick();
 	  loggerEmplaceU32(logBuffer, TS, time);
 
-	  sprintf(msg, "AIN2: %d\r\n", getAnalog(&hspi4, ADC_STP));
+	  sprintf(msg, "AIN2: %d\r\n", fbp);
 	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
 	  HAL_Delay(2);
