@@ -65,6 +65,7 @@ DMA_HandleTypeDef hdma_uart9_rx;
 DMA_HandleTypeDef hdma_uart9_tx;
 
 /* USER CODE BEGIN PV */
+FDCAN_FilterTypeDef canFilter;
 FATFS fatFS;
 FIL file;
 char diskPath[4];
@@ -357,9 +358,9 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.DataTimeSeg1 = 1;
   hfdcan3.Init.DataTimeSeg2 = 1;
   hfdcan3.Init.MessageRAMOffset = 0;
-  hfdcan3.Init.StdFiltersNbr = 0;
+  hfdcan3.Init.StdFiltersNbr = 1;
   hfdcan3.Init.ExtFiltersNbr = 0;
-  hfdcan3.Init.RxFifo0ElmtsNbr = 0;
+  hfdcan3.Init.RxFifo0ElmtsNbr = 32;
   hfdcan3.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.RxFifo1ElmtsNbr = 0;
   hfdcan3.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -375,10 +376,29 @@ static void MX_FDCAN3_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN3_Init 2 */
+
+
+  canFilter.IdType = FDCAN_STANDARD_ID;
+  canFilter.FilterIndex = 0;
+  canFilter.FilterType = FDCAN_FILTER_RANGE;
+  canFilter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  // accept all IDs
+  canFilter.FilterID1 = 0x00;
+  canFilter.FilterID2 = 0x7FF;
+  canFilter.RxBufferIndex = 0;
+
+  HAL_FDCAN_ConfigFilter(&hfdcan3, &canFilter);
+
   if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK)
-    {
-      Error_Handler();
-    }
+	{
+	  Error_Handler();
+	}
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+    /* Notification Error */
+    Error_Handler();
+  }
   /* USER CODE END FDCAN3_Init 2 */
 
 }

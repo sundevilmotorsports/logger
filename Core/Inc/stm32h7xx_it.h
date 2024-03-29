@@ -60,6 +60,7 @@ void DMA1_Stream3_IRQHandler(void);
 void SDMMC1_IRQHandler(void);
 void OTG_HS_IRQHandler(void);
 void UART9_IRQHandler(void);
+void FDCAN3_IT0_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */
