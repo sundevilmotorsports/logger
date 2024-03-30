@@ -71,6 +71,7 @@ FIL file;
 char diskPath[4];
 uint8_t rtext[_MAX_SS];/* File read buffer */
 
+uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
 
@@ -112,6 +113,33 @@ static void MX_FDCAN3_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+FDCAN_RxHeaderTypeDef   RxHeader;
+uint8_t               RxData[8];
+int count = 0;
+
+void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
+{
+  if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
+  {
+    /* Retreive Rx messages from RX FIFO0 */
+    if (HAL_FDCAN_GetRxMessage(hfdcan, FDCAN_RX_FIFO0, &RxHeader, RxData) != HAL_OK)
+    {
+    /* Reception Error */
+    	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+    	Error_Handler();
+    }
+    // do things with data
+    count++;
+
+    if (HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+    {
+      /* Notification Error */
+    	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+      Error_Handler();
+    }
+  }
+}
 
 int _write( int file, char *ptr, int len )
 {
@@ -232,9 +260,49 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
 	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
 
+	  adcEnable();
+	  switch(usbBuffer[0]) {
+	  case '0':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '1':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 1), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '2':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 2), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '3':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 3), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '4':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 4), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '5':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 5), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '6':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 6), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  case '7':
+		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 7), count);
+		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  break;
+	  default:
+		  sprintf(msg, "no channel selected\tCAN msgs received: %d\r\n", count);
+		  		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  		  break;
+	  }
+	  adcDisable();
 
-	  sprintf(msg, "AIN2: %d\r\n", fbp);
-	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+	  //sprintf(msg, "AIN2: %d\tCAN msgs received: %d\r\n", fbp, count);
+	  //CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 
 
 	  uint32_t time = HAL_GetTick();
