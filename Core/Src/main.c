@@ -86,6 +86,13 @@ enum LogChannel {
 	RRSHOCK, RRSHOCK1,
 	CURRENT, CURRENT1,
 	BATTERY, BATTERY1,
+	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3,
+	IMU_Y_ACCEL, IMU_Y_ACCEL1, IMU_Y_ACCEL2, IMU_Y_ACCEL3,
+	IMU_Z_ACCEL, IMU_Z_ACCEL1, IMU_Z_ACCEL2, IMU_Z_ACCEL3,
+	FR_SG, FR_SG1,
+	FL_SG, FL_SG1,
+	RL_SG, RL_SG1,
+	RR_SG, RR_SG1,
 	// gps
 	// gps
 	// gps fix
@@ -117,7 +124,8 @@ static void MX_FDCAN3_Init(void);
 FDCAN_RxHeaderTypeDef   RxHeader;
 uint8_t               RxData[8];
 int count = 0;
-
+uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
+uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -127,16 +135,41 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     {
     /* Reception Error */
     	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-    	Error_Handler();
+    	return;
+    	//Error_Handler();
     }
     // do things with data
-    count++;
+    count = 1;
+    switch(RxHeader.Identifier) {
+    case 0x360:
+    	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	yAccel = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+    	break;
+    case 0x361:
+    	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	break;
+    case 0x362:
+    	break;
+    case 0x4e2:
+    	frsg = RxData[0] << 8 | RxData[1];
+    	break;
+    case 0x4e3:
+    	flsg = RxData[0] << 8 | RxData[1];
+    	break;
+    case 0x4e4:
+    	rrsg = RxData[0] << 8 | RxData[1];
+    	break;
+    case 0x4e5:
+    	rlsg = RxData[0] << 8 | RxData[1];
+    	break;
+    }
+
 
     if (HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
     {
       /* Notification Error */
     	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-      Error_Handler();
+      //Error_Handler();
     }
   }
 }
@@ -200,22 +233,16 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  uint8_t data[2];
-  data[0] = 0;
-  data[1] = 0;
-  uint16_t channel = 0;
   char msg[100];
   char name[16];
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
-  //uint32_t Timer = HAL_GetTick();
 
   UINT wbytes; // unsigned int
 
   uint8_t runNo = 0;
-  HAL_StatusTypeDef ret = HAL_ERROR;
   uint16_t runNoAddr = 4;
-  ret = eepromRead(&hi2c2, runNoAddr, &runNo);
+  eepromRead(&hi2c2, runNoAddr, &runNo);
 
   sprintf(name, "data%d.benji", runNo);
   if(++runNo == 255) {
@@ -245,10 +272,8 @@ int main(void)
 
   while (1)
   {
-	  uint16_t fbp = 0;
 	  adcEnable();
-	  fbp = getAnalog(&hspi4, ADC_FBP);
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fbp);
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, getAnalog(&hspi4, ADC_FBP));
 	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, getAnalog(&hspi4, ADC_RBP));
 	  loggerEmplaceU16(logBuffer, STEERING, getAnalog(&hspi4, ADC_STP));
 	  loggerEmplaceU16(logBuffer, FLSHOCK, getAnalog(&hspi4, ADC_FLS));
@@ -260,46 +285,60 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
 	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
 
-	  adcEnable();
-	  switch(usbBuffer[0]) {
-	  case '0':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '1':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 1), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '2':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 2), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '3':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 3), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '4':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 4), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '5':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 5), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '6':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 6), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  case '7':
-		  sprintf(msg, "AIN%c: %d\tCAN msgs received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 7), count);
-		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  break;
-	  default:
-		  sprintf(msg, "no channel selected\tCAN msgs received: %d\r\n", count);
-		  		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  		  break;
+	  loggerEmplaceU32(logBuffer, IMU_X_ACCEL, xAccel);
+	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
+	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
+
+	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
+	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
+	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
+	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
+
+	  static uint32_t usbTimeout = 0;
+	  if(HAL_GetTick() - usbTimeout > 750) {
+		  usbTimeout = HAL_GetTick();
+		  adcEnable();
+		  switch(usbBuffer[0]) {
+		  case '0':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), xAccel);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '1':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 1), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '2':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 2), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '3':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 3), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '4':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 4), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '5':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 5), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '6':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 6), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case '7':
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 7), count);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  default:
+			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
+			  		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  		  break;
+		  }
+		  adcDisable();
 	  }
-	  adcDisable();
+
 
 	  //sprintf(msg, "AIN2: %d\tCAN msgs received: %d\r\n", fbp, count);
 	  //CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -454,13 +493,15 @@ static void MX_FDCAN3_Init(void)
   canFilter.FilterID1 = 0x00;
   canFilter.FilterID2 = 0x7FF;
   canFilter.RxBufferIndex = 0;
-
   HAL_FDCAN_ConfigFilter(&hfdcan3, &canFilter);
 
   if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK)
 	{
 	  Error_Handler();
 	}
+
+  HAL_StatusTypeDef ret = HAL_OK;
+  //ret = HAL_FDCAN_RegisterRxFifo0Callback(&hfdcan3, )
 
   if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
   {
