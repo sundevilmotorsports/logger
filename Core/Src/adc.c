@@ -24,8 +24,9 @@ void adcDisable() {
 uint16_t getAnalog(SPI_HandleTypeDef* hspi, uint8_t channel) {
 
 	uint8_t channelInput = channel << 3;
-	HAL_SPI_Transmit(hspi, &channelInput, 1, 1000);
-	HAL_SPI_Receive(hspi, buffer, 2, 1000);
-	uint16_t output = buffer[1] << 8 | buffer[0]; // TODO do some thonking
+	//HAL_SPI_Transmit(hspi, &channelInput, 1, 1000);
+	HAL_SPI_TransmitReceive(hspi, &channelInput, buffer, 1, 1000);
+	HAL_SPI_Receive(hspi, (buffer + sizeof(uint8_t)), 1, 1000);
+	uint16_t output = buffer[0] << 8 | buffer[1]; // TODO do some thonking
 	return output;
 }
