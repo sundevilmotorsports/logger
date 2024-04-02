@@ -80,16 +80,19 @@ enum LogChannel {
 	F_BRAKEPRESSURE, F_BRAKEPRESSURE1, // front brake pressure
 	R_BRAKEPRESSURE, R_BRAKEPRESSURE1, // rear brake pressure
 	STEERING, STEERING1, // steering pot
-	FRSHOCK, FRSHOCK1,
 	FLSHOCK, FLSHOCK1,
-	RLSHOCK, RLSHOCK1,
+	FRSHOCK, FRSHOCK1,
 	RRSHOCK, RRSHOCK1,
+	RLSHOCK, RLSHOCK1,
 	CURRENT, CURRENT1,
 	BATTERY, BATTERY1,
-	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3,
+	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3, // mG
 	IMU_Y_ACCEL, IMU_Y_ACCEL1, IMU_Y_ACCEL2, IMU_Y_ACCEL3,
 	IMU_Z_ACCEL, IMU_Z_ACCEL1, IMU_Z_ACCEL2, IMU_Z_ACCEL3,
-	FR_SG, FR_SG1,
+	IMU_X_GYRO, IMU_X_GYRO1, IMU_X_GYRO2, IMU_X_GYRO3, // mdps
+	IMU_Y_GYRO, IMU_Y_GYRO1, IMU_Y_GYRO2, IMU_Y_GYRO3,
+	IMU_Z_GYRO, IMU_Z_GYRO1, IMU_Z_GYRO2, IMU_Z_GYRO3,
+	FR_SG, FR_SG1, // 16 bit adc
 	FL_SG, FL_SG1,
 	RL_SG, RL_SG1,
 	RR_SG, RR_SG1,
@@ -121,11 +124,20 @@ static void MX_FDCAN3_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+typedef struct {
+	uint16_t ambTemp;
+	uint16_t objTemp;
+	uint16_t rpm;
+} wheel_data_s_t;
+
 FDCAN_RxHeaderTypeDef   RxHeader;
 uint8_t               RxData[8];
 int count = 0;
 uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
+uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
+wheel_data_s_t frw, flw, rlw, rrw;
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -147,8 +159,31 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	break;
     case 0x361:
     	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	xGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
     	break;
     case 0x362:
+    	yGyro = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+    	break;
+    case 0x363:
+    	flw.rpm = RxData[0] << 8 | RxData[1];
+    	flw.objTemp = RxData[2] << 8 | RxData[3];
+    	flw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x364:
+    	frw.rpm = RxData[0] << 8 | RxData[1];
+    	frw.objTemp = RxData[2] << 8 | RxData[3];
+    	frw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x365:
+    	rrw.rpm = RxData[0] << 8 | RxData[1];
+    	rrw.objTemp = RxData[2] << 8 | RxData[3];
+    	rrw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x366:
+    	rlw.rpm = RxData[0] << 8 | RxData[1];
+    	rlw.objTemp = RxData[2] << 8 | RxData[3];
+    	rlw.ambTemp = RxData[4] << 8 | RxData[5];
     	break;
     case 0x4e2:
     	frsg = RxData[0] << 8 | RxData[1];
@@ -243,6 +278,7 @@ int main(void)
   uint8_t runNo = 0;
   uint16_t runNoAddr = 4;
   eepromRead(&hi2c2, runNoAddr, &runNo);
+  uint8_t currRunNo = runNo;
 
   sprintf(name, "data%d.benji", runNo);
   if(++runNo == 255) {
@@ -295,12 +331,12 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
 	  static uint32_t usbTimeout = 0;
-	  if(HAL_GetTick() - usbTimeout > 750) {
+	  if(HAL_GetTick() - usbTimeout > 500) {
 		  usbTimeout = HAL_GetTick();
 		  adcEnable();
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), xAccel);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
@@ -331,10 +367,34 @@ int main(void)
 			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 7), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
+		  case 's':
+			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'a':
+			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
+					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
+					  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
+					  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
+					  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
+					  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
+					  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
+					  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
+			  );
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'm':
+			  sprintf(msg, "current file: data%d.benji\r\n", currRunNo);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'p':
+			  sprintf(msg, "current draw: %f mA\tbattery: %f V\r\n", ((float) getCurrent(&hi2c4)) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  default:
 			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
-			  		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  		  break;
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  }
 		  adcDisable();
 	  }
