@@ -80,19 +80,35 @@ enum LogChannel {
 	F_BRAKEPRESSURE, F_BRAKEPRESSURE1, // front brake pressure
 	R_BRAKEPRESSURE, R_BRAKEPRESSURE1, // rear brake pressure
 	STEERING, STEERING1, // steering pot
-	FRSHOCK, FRSHOCK1,
 	FLSHOCK, FLSHOCK1,
-	RLSHOCK, RLSHOCK1,
+	FRSHOCK, FRSHOCK1,
 	RRSHOCK, RRSHOCK1,
+	RLSHOCK, RLSHOCK1,
 	CURRENT, CURRENT1,
 	BATTERY, BATTERY1,
-	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3,
+	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3, // mG
 	IMU_Y_ACCEL, IMU_Y_ACCEL1, IMU_Y_ACCEL2, IMU_Y_ACCEL3,
 	IMU_Z_ACCEL, IMU_Z_ACCEL1, IMU_Z_ACCEL2, IMU_Z_ACCEL3,
-	FR_SG, FR_SG1,
+	IMU_X_GYRO, IMU_X_GYRO1, IMU_X_GYRO2, IMU_X_GYRO3, // mdps
+	IMU_Y_GYRO, IMU_Y_GYRO1, IMU_Y_GYRO2, IMU_Y_GYRO3,
+	IMU_Z_GYRO, IMU_Z_GYRO1, IMU_Z_GYRO2, IMU_Z_GYRO3,
+	FR_SG, FR_SG1, // 16 bit adc
 	FL_SG, FL_SG1,
 	RL_SG, RL_SG1,
 	RR_SG, RR_SG1,
+	FLW_AMB, FLW_AMB1,
+	FLW_OBJ, FLW_OBJ1,
+	FLW_RPM, FLW_RPM1,
+	FRW_AMB, FRW_AMB1,
+	FRW_OBJ, FRW_OBJ1,
+	FRW_RPM, FRW_RPM1,
+	RRW_AMB, RRW_AMB1,
+	RRW_OBJ, RRW_OBJ1,
+	RRW_RPM, RRW_RPM1,
+	RLW_AMB, RLW_AMB1,
+	RLW_OBJ, RLW_OBJ1,
+	RLW_RPM, RLW_RPM1,
+	TESTNO,
 	// gps
 	// gps
 	// gps fix
@@ -115,17 +131,31 @@ static void MX_UART9_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 /* USER CODE BEGIN PFP */
-
+// calculate temperature in celsius
+float mlx90614(uint16_t temp);
+float mlx90614(uint16_t temp) {
+	return (((float) temp * 0.02) - 273.15);
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+typedef struct {
+	uint16_t ambTemp;
+	uint16_t objTemp;
+	uint16_t rpm;
+} wheel_data_s_t;
+
 FDCAN_RxHeaderTypeDef   RxHeader;
 uint8_t               RxData[8];
 int count = 0;
 uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
+uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
+wheel_data_s_t frw, flw, rlw, rrw;
+uint8_t testNo = 0;
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -147,14 +177,37 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	break;
     case 0x361:
     	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	xGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
     	break;
     case 0x362:
+    	yGyro = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
+    	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+    	break;
+    case 0x363:
+    	flw.rpm = RxData[0] << 8 | RxData[1];
+    	flw.objTemp = RxData[2] << 8 | RxData[3];
+    	flw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x364:
+    	frw.rpm = RxData[0] << 8 | RxData[1];
+    	frw.objTemp = RxData[2] << 8 | RxData[3];
+    	frw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x365:
+    	rrw.rpm = RxData[0] << 8 | RxData[1];
+    	rrw.objTemp = RxData[2] << 8 | RxData[3];
+    	rrw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x366:
+    	rlw.rpm = RxData[0] << 8 | RxData[1];
+    	rlw.objTemp = RxData[2] << 8 | RxData[3];
+    	rlw.ambTemp = RxData[4] << 8 | RxData[5];
     	break;
     case 0x4e2:
-    	frsg = RxData[0] << 8 | RxData[1];
+    	flsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e3:
-    	flsg = RxData[0] << 8 | RxData[1];
+    	frsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e4:
     	rrsg = RxData[0] << 8 | RxData[1];
@@ -233,7 +286,7 @@ int main(void)
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  char msg[100];
+  char msg[128];
   char name[16];
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
@@ -243,6 +296,7 @@ int main(void)
   uint8_t runNo = 0;
   uint16_t runNoAddr = 4;
   eepromRead(&hi2c2, runNoAddr, &runNo);
+  uint8_t currRunNo = runNo;
 
   sprintf(name, "data%d.benji", runNo);
   if(++runNo == 255) {
@@ -273,13 +327,13 @@ int main(void)
   while (1)
   {
 	  adcEnable();
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, getAnalog(&hspi4, ADC_FBP));
-	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, getAnalog(&hspi4, ADC_RBP));
-	  loggerEmplaceU16(logBuffer, STEERING, getAnalog(&hspi4, ADC_STP));
-	  loggerEmplaceU16(logBuffer, FLSHOCK, getAnalog(&hspi4, ADC_FLS));
-	  loggerEmplaceU16(logBuffer, FRSHOCK, getAnalog(&hspi4, ADC_FRS));
-	  loggerEmplaceU16(logBuffer, RRSHOCK, getAnalog(&hspi4, ADC_RRS));
-	  loggerEmplaceU16(logBuffer, RLSHOCK, getAnalog(&hspi4, ADC_RLS));
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_FBP));
+	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_RBP));
+	  loggerEmplaceU16(logBuffer, STEERING, eGetAnalog(&hspi4, ADC_STP));
+	  loggerEmplaceU16(logBuffer, FLSHOCK, eGetAnalog(&hspi4, ADC_FLS));
+	  loggerEmplaceU16(logBuffer, FRSHOCK, eGetAnalog(&hspi4, ADC_FRS));
+	  loggerEmplaceU16(logBuffer, RRSHOCK, eGetAnalog(&hspi4, ADC_RRS));
+	  loggerEmplaceU16(logBuffer, RLSHOCK, eGetAnalog(&hspi4, ADC_RLS));
 	  adcDisable();
 
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
@@ -289,52 +343,112 @@ int main(void)
 	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
 
+	  loggerEmplaceU32(logBuffer, IMU_X_GYRO, xGyro);
+	  loggerEmplaceU32(logBuffer, IMU_Y_GYRO, yGyro);
+	  loggerEmplaceU32(logBuffer, IMU_Z_GYRO, zGyro);
+
+	  loggerEmplaceU16(logBuffer, FLW_AMB, flw.ambTemp);
+	  loggerEmplaceU16(logBuffer, FLW_OBJ, flw.objTemp);
+	  loggerEmplaceU16(logBuffer, FLW_RPM, flw.rpm);
+
+	  loggerEmplaceU16(logBuffer, FRW_AMB, frw.ambTemp);
+	  loggerEmplaceU16(logBuffer, FRW_OBJ, frw.objTemp);
+	  loggerEmplaceU16(logBuffer, FRW_RPM, frw.rpm);
+
+	  loggerEmplaceU16(logBuffer, RRW_AMB, rrw.ambTemp);
+	  loggerEmplaceU16(logBuffer, RRW_OBJ, rrw.objTemp);
+	  loggerEmplaceU16(logBuffer, RRW_RPM, rrw.rpm);
+
+	  loggerEmplaceU16(logBuffer, RLW_AMB, rlw.ambTemp);
+	  loggerEmplaceU16(logBuffer, RLW_OBJ, rlw.objTemp);
+	  loggerEmplaceU16(logBuffer, RLW_RPM, rlw.rpm);
+
 	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
 	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  logBuffer[TESTNO] = testNo;
+
 	  static uint32_t usbTimeout = 0;
-	  if(HAL_GetTick() - usbTimeout > 750) {
+	  if(HAL_GetTick() - usbTimeout > 250) {
 		  usbTimeout = HAL_GetTick();
 		  adcEnable();
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 0), xAccel);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 1), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 2), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 3), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 4), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 5), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 6), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], getAnalog(&hspi4, 7), count);
+			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7), count);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 's':
+			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'a':
+			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
+					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
+					  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
+					  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
+					  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
+					  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
+					  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
+					  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
+			  );
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'w':
+			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
+					  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
+					  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
+					  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
+					  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
+					  );
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+		  case 'm':
+			  sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'p':
+			  sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 't':
+			  testNo++;
+			  sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  usbBuffer[0] = 'm';
 			  break;
 		  default:
 			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
-			  		  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  		  break;
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  }
 		  adcDisable();
 	  }
