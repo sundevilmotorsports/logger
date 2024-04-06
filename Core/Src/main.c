@@ -108,6 +108,7 @@ enum LogChannel {
 	RLW_AMB, RLW_AMB1,
 	RLW_OBJ, RLW_OBJ1,
 	RLW_RPM, RLW_RPM1,
+	TESTNO,
 	// gps
 	// gps
 	// gps fix
@@ -130,7 +131,11 @@ static void MX_UART9_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 /* USER CODE BEGIN PFP */
-
+// calculate temperature in celsius
+float mlx90614(uint16_t temp);
+float mlx90614(uint16_t temp) {
+	return (((float) temp * 0.02) - 273.15);
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -149,6 +154,7 @@ uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
 wheel_data_s_t frw, flw, rlw, rrw;
+uint8_t testNo = 0;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
@@ -198,10 +204,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
     	break;
     case 0x4e2:
-    	frsg = RxData[0] << 8 | RxData[1];
+    	flsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e3:
-    	flsg = RxData[0] << 8 | RxData[1];
+    	frsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e4:
     	rrsg = RxData[0] << 8 | RxData[1];
@@ -337,15 +343,32 @@ int main(void)
 	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
 
+	  loggerEmplaceU32(logBuffer, IMU_X_GYRO, xGyro);
+	  loggerEmplaceU32(logBuffer, IMU_Y_GYRO, yGyro);
+	  loggerEmplaceU32(logBuffer, IMU_Z_GYRO, zGyro);
+
 	  loggerEmplaceU16(logBuffer, FLW_AMB, flw.ambTemp);
 	  loggerEmplaceU16(logBuffer, FLW_OBJ, flw.objTemp);
 	  loggerEmplaceU16(logBuffer, FLW_RPM, flw.rpm);
-	  // TODO the other wheels
+
+	  loggerEmplaceU16(logBuffer, FRW_AMB, frw.ambTemp);
+	  loggerEmplaceU16(logBuffer, FRW_OBJ, frw.objTemp);
+	  loggerEmplaceU16(logBuffer, FRW_RPM, frw.rpm);
+
+	  loggerEmplaceU16(logBuffer, RRW_AMB, rrw.ambTemp);
+	  loggerEmplaceU16(logBuffer, RRW_OBJ, rrw.objTemp);
+	  loggerEmplaceU16(logBuffer, RRW_RPM, rrw.rpm);
+
+	  loggerEmplaceU16(logBuffer, RLW_AMB, rlw.ambTemp);
+	  loggerEmplaceU16(logBuffer, RLW_OBJ, rlw.objTemp);
+	  loggerEmplaceU16(logBuffer, RLW_RPM, rlw.rpm);
 
 	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
 	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
+
+	  logBuffer[TESTNO] = testNo;
 
 	  static uint32_t usbTimeout = 0;
 	  if(HAL_GetTick() - usbTimeout > 250) {
@@ -401,15 +424,26 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'w':
-			  sprintf(msg, "FL rotor: %d\tFL RPM: %d\r\n", flw.objTemp, flw.rpm);
+			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
+					  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
+					  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
+					  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
+					  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
+					  );
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 		  case 'm':
-			  sprintf(msg, "current file: data%d.benji\r\n", currRunNo);
+			  sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'p':
-			  sprintf(msg, "current draw: %f mA\tbattery: %f V\r\n", ((float) getCurrent(&hi2c4)) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+			  sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 't':
+			  testNo++;
+			  sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  usbBuffer[0] = 'm';
 			  break;
 		  default:
 			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
