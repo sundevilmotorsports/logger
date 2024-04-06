@@ -26,5 +26,6 @@ void adcInit();
 void adcEnable();
 void adcDisable();
 uint16_t getAnalog(SPI_HandleTypeDef* hspi, uint8_t channel);
+uint16_t eGetAnalog(SPI_HandleTypeDef* hspi, uint8_t channel);
 
 #endif /* INC_ADC_H_ */
