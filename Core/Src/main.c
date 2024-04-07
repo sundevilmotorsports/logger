@@ -149,13 +149,13 @@ typedef struct {
 
 FDCAN_RxHeaderTypeDef   RxHeader;
 uint8_t               RxData[8];
-int count = 0;
+uint32_t count = 0;
 uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
 wheel_data_s_t frw, flw, rlw, rrw;
 uint8_t testNo = 0;
-
+uint8_t canFifoFull = 0;
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -169,7 +169,11 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
-    count = 1;
+    canFifoFull = 0;
+    count += 1;
+    if (count > 900000) {
+    	count = 0;
+    }
     switch(RxHeader.Identifier) {
     case 0x360:
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
@@ -224,6 +228,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
       //Error_Handler();
     }
+  }
+  else if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_FULL) != RESET) {
+	  canFifoFull = 1;
+	  HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_FULL, 0);
   }
 }
 
@@ -376,39 +384,47 @@ int main(void)
 		  adcEnable();
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7), count);
+			  sprintf(msg, "AIN%c: %dr\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 's':
 			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'i':
+			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'c':
+			  sprintf(msg, "messages: %ld\tfifo full: %ld\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'a':
@@ -446,7 +462,7 @@ int main(void)
 			  usbBuffer[0] = 'm';
 			  break;
 		  default:
-			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
+			  sprintf(msg, "no channel selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  }
@@ -581,7 +597,7 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.MessageRAMOffset = 0;
   hfdcan3.Init.StdFiltersNbr = 1;
   hfdcan3.Init.ExtFiltersNbr = 0;
-  hfdcan3.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan3.Init.RxFifo0ElmtsNbr = 64;
   hfdcan3.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.RxFifo1ElmtsNbr = 0;
   hfdcan3.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -598,7 +614,7 @@ static void MX_FDCAN3_Init(void)
   }
   /* USER CODE BEGIN FDCAN3_Init 2 */
 
-
+  HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan3, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_OVERWRITE);
   canFilter.IdType = FDCAN_STANDARD_ID;
   canFilter.FilterIndex = 0;
   canFilter.FilterType = FDCAN_FILTER_RANGE;
@@ -614,14 +630,12 @@ static void MX_FDCAN3_Init(void)
 	  Error_Handler();
 	}
 
-  HAL_StatusTypeDef ret = HAL_OK;
-  //ret = HAL_FDCAN_RegisterRxFifo0Callback(&hfdcan3, )
-
   if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
   {
     /* Notification Error */
     Error_Handler();
   }
+  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN3_Init 2 */
 
 }
