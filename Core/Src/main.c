@@ -108,6 +108,10 @@ enum LogChannel {
 	RLW_AMB, RLW_AMB1,
 	RLW_OBJ, RLW_OBJ1,
 	RLW_RPM, RLW_RPM1,
+	BRAKE_FLUID, BRAKE_FLUID1,
+	THROTTLE_LOAD, THROTTLE_LOAD1,
+	BRAKE_LOAD, BRAKE_LOAD1,
+	DRS,
 	TESTNO,
 	// gps
 	// gps
@@ -147,15 +151,17 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
-FDCAN_RxHeaderTypeDef   RxHeader;
-uint8_t               RxData[8];
-uint32_t count = 0;
-uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
-uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
-uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
-wheel_data_s_t frw, flw, rlw, rrw;
-uint8_t testNo = 0;
-uint8_t canFifoFull = 0;
+volatile FDCAN_RxHeaderTypeDef	RxHeader;
+volatile uint8_t               	RxData[8];
+volatile uint32_t count = 0;
+volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
+volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
+volatile uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
+volatile wheel_data_s_t frw, flw, rlw, rrw;
+volatile uint8_t testNo = 0;
+volatile uint8_t canFifoFull = 0;
+volatile uint8_t drs = 0;
+volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -206,6 +212,14 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
+    	break;
+    case 0x367:
+    	drs = RxData[0];
+    	break;
+    case 0x368:
+    	brakeFluid = RxData[0] << 8 | RxData[1];
+    	throttleLoad = RxData[2] << 8 | RxData[3];
+    	brakeLoad = RxData[4] << 8 | RxData[5];
     	break;
     case 0x4e2:
     	flsg = RxData[0] << 8 | RxData[1];
@@ -376,6 +390,11 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
+	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
+	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
+
+	  logBuffer[DRS] = drs;
 	  logBuffer[TESTNO] = testNo;
 
 	  static uint32_t usbTimeout = 0;
