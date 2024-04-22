@@ -66,19 +66,14 @@ void GNSS_Init(GNSS_StateHandle *GNSS, UART_HandleTypeDef *huart) {
 void GNSS_ParseBuffer(GNSS_StateHandle *GNSS) {
 
 	for (int var = 0; var <= 100; ++var) {
-		if (GNSS->uartWorkingBuffer[var] == 0xB5
-				&& GNSS->uartWorkingBuffer[var + 1] == 0x62) {
-			if (GNSS->uartWorkingBuffer[var + 2] == 0x27
-					&& GNSS->uartWorkingBuffer[var + 3] == 0x03) { //Look at: 32.19.1.1 u-blox 8 Receiver description
+		if (GNSS->uartWorkingBuffer[var] == 0xB5 && GNSS->uartWorkingBuffer[var + 1] == 0x62) {
+			if (GNSS->uartWorkingBuffer[var + 2] == 0x27 && GNSS->uartWorkingBuffer[var + 3] == 0x03) { //Look at: 32.19.1.1 u-blox 8 Receiver description
 				GNSS_ParseUniqID(GNSS);
-			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01
-					&& GNSS->uartWorkingBuffer[var + 3] == 0x21) { //Look at: 32.17.14.1 u-blox 8 Receiver description
+			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01 && GNSS->uartWorkingBuffer[var + 3] == 0x21) { //Look at: 32.17.14.1 u-blox 8 Receiver description
 				GNSS_ParseNavigatorData(GNSS);
-			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01
-					&& GNSS->uartWorkingBuffer[var + 3] == 0x07) { //ook at: 32.17.30.1 u-blox 8 Receiver description
+			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01 && GNSS->uartWorkingBuffer[var + 3] == 0x07) { //ook at: 32.17.30.1 u-blox 8 Receiver description
 				GNSS_ParsePVTData(GNSS);
-			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01
-					&& GNSS->uartWorkingBuffer[var + 3] == 0x02) { // Look at: 32.17.15.1 u-blox 8 Receiver description
+			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01 && GNSS->uartWorkingBuffer[var + 3] == 0x02) { // Look at: 32.17.15.1 u-blox 8 Receiver description
 				GNSS_ParsePOSLLHData(GNSS);
 			}
 		}
@@ -169,12 +164,12 @@ void GNSS_SetMode(GNSS_StateHandle *GNSS, short gnssMode) {
  * @param GNSS Pointer to main GNSS structure.
  */
 void GNSS_ParsePVTData(GNSS_StateHandle *GNSS) {
-	uShort.bytes[0] = GNSS_Handle.uartWorkingBuffer[10];
-	GNSS->yearBytes[0]=GNSS_Handle.uartWorkingBuffer[10];
+	uShort.bytes[0] = GNSS_Handle.uartWorkingBuffer[10]; // payload starts at byte 6
+	GNSS->yearBytes[0]=GNSS_Handle.uartWorkingBuffer[10]; // payload byte offset 4
 	uShort.bytes[1] = GNSS_Handle.uartWorkingBuffer[11];
 	GNSS->yearBytes[1]=GNSS_Handle.uartWorkingBuffer[11];
 	GNSS->year = uShort.uShort;
-	GNSS->month = GNSS_Handle.uartWorkingBuffer[12];
+	GNSS->month = GNSS_Handle.uartWorkingBuffer[12]; // 12 - 6 (payload start) = 6 (byte offset)
 	GNSS->day = GNSS_Handle.uartWorkingBuffer[13];
 	GNSS->hour = GNSS_Handle.uartWorkingBuffer[14];
 	GNSS->min = GNSS_Handle.uartWorkingBuffer[15];

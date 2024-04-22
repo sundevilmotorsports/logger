@@ -112,11 +112,10 @@ enum LogChannel {
 	THROTTLE_LOAD, THROTTLE_LOAD1,
 	BRAKE_LOAD, BRAKE_LOAD1,
 	DRS,
+	GPS_LON, GPS_LON1, GPS_LON2, GPS_LON3,
+	GPS_LAT, GPS_LAT1, GPS_LAT2, GPS_LAT3,
+	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	TESTNO,
-	// gps
-	// gps
-	// gps fix
-
 	CH_COUNT
 };
 
@@ -151,8 +150,8 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
-volatile FDCAN_RxHeaderTypeDef	RxHeader;
-volatile uint8_t               	RxData[8];
+FDCAN_RxHeaderTypeDef	RxHeader;
+uint8_t               	RxData[8];
 volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
@@ -260,6 +259,14 @@ void SWD_Init(void)
 {
 	*(__IO uint32_t*) (0x5C003010) = ((SystemCoreClock / 2 / 2000000) - 1);
 }
+
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+	int a = 0;
+}
+
+
 /* USER CODE END 0 */
 
 /**
@@ -301,8 +308,11 @@ int main(void)
   MX_FDCAN3_Init();
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
+
   GNSS_Init(&GNSS_Handle, &huart9);
+  GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
+  GNSS_ParseBuffer(&GNSS_Handle);
   //GNSS_LoadConfig(&GNSS_Handle);
   /* USER CODE END 2 */
 
@@ -480,6 +490,14 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  usbBuffer[0] = 'm';
 			  break;
+		  case 'g':
+			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tID: %04x%04x%04x%04x\r\n", GNSS_Handle.fixType,
+				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+				  GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1], GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3]
+				  );
+		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  default:
 			  sprintf(msg, "no channel selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -488,36 +506,20 @@ int main(void)
 		  adcDisable();
 	  }
 
-
-	  //sprintf(msg, "AIN2: %d\tCAN msgs received: %d\r\n", fbp, count);
-	  //CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-
-
 	  uint32_t time = HAL_GetTick();
 	  loggerEmplaceU32(logBuffer, TS, time);
-	  //HAL_Delay(2);
 	  if(f_write(&file, &logBuffer, sizeof(logBuffer), &wbytes) == FR_OK) {
 		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  }
 	  f_sync(&file);
 
-/*
-		if ((HAL_GetTick() - Timer) > 1000) {
-			GNSS_GetUniqID(&GNSS_Handle);
+	  static uint32_t GPS_Timer = 0;
+		if ((HAL_GetTick() - GPS_Timer) > 1000) {
 			GNSS_ParseBuffer(&GNSS_Handle);
-			HAL_Delay(250);
 			GNSS_GetPVTData(&GNSS_Handle);
-			GNSS_ParseBuffer(&GNSS_Handle);
-
-			sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tID: %04x%04x%04x%04x\r\n", GNSS_Handle.fixType,
-					GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
-					GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-					GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1], GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3]
-					);
-			CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			Timer = HAL_GetTick();
+			GPS_Timer = HAL_GetTick();
 		}
-		*/
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -846,7 +848,7 @@ static void MX_UART9_Init(void)
 
   /* USER CODE END UART9_Init 1 */
   huart9.Instance = UART9;
-  huart9.Init.BaudRate = 9600;
+  huart9.Init.BaudRate = 38400;
   huart9.Init.WordLength = UART_WORDLENGTH_8B;
   huart9.Init.StopBits = UART_STOPBITS_1;
   huart9.Init.Parity = UART_PARITY_NONE;
