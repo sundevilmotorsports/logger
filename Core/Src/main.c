@@ -261,12 +261,6 @@ void SWD_Init(void)
 }
 
 
-void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
-{
-	int a = 0;
-}
-
-
 /* USER CODE END 0 */
 
 /**
@@ -313,7 +307,7 @@ int main(void)
   GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
   GNSS_ParseBuffer(&GNSS_Handle);
-  //GNSS_LoadConfig(&GNSS_Handle);
+  //GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -404,6 +398,17 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
+	  static uint32_t GPS_Timer = 0;
+	  if ((HAL_GetTick() - GPS_Timer) > 900) {
+		  GNSS_ParseBuffer(&GNSS_Handle);
+		  GNSS_GetPVTData(&GNSS_Handle);
+
+		  loggerEmplaceU32(logBuffer, GPS_LON, GNSS_Handle.lon);
+		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
+		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
+		  GPS_Timer = HAL_GetTick();
+	  }
+
 	  logBuffer[DRS] = drs;
 	  logBuffer[TESTNO] = testNo;
 
@@ -453,7 +458,7 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'c':
-			  sprintf(msg, "messages: %ld\tfifo full: %ld\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+			  sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'a':
@@ -491,10 +496,10 @@ int main(void)
 			  usbBuffer[0] = 'm';
 			  break;
 		  case 'g':
-			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tID: %04x%04x%04x%04x\r\n", GNSS_Handle.fixType,
+			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
 				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
 				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-				  GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1], GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3]
+				  GNSS_Handle.lon, GNSS_Handle.lat
 				  );
 		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
@@ -513,12 +518,7 @@ int main(void)
 	  }
 	  f_sync(&file);
 
-	  static uint32_t GPS_Timer = 0;
-		if ((HAL_GetTick() - GPS_Timer) > 1000) {
-			GNSS_ParseBuffer(&GNSS_Handle);
-			GNSS_GetPVTData(&GNSS_Handle);
-			GPS_Timer = HAL_GetTick();
-		}
+
 
     /* USER CODE END WHILE */
 
