@@ -108,11 +108,14 @@ enum LogChannel {
 	RLW_AMB, RLW_AMB1,
 	RLW_OBJ, RLW_OBJ1,
 	RLW_RPM, RLW_RPM1,
+	BRAKE_FLUID, BRAKE_FLUID1,
+	THROTTLE_LOAD, THROTTLE_LOAD1,
+	BRAKE_LOAD, BRAKE_LOAD1,
+	DRS,
+	GPS_LON, GPS_LON1, GPS_LON2, GPS_LON3,
+	GPS_LAT, GPS_LAT1, GPS_LAT2, GPS_LAT3,
+	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	TESTNO,
-	// gps
-	// gps
-	// gps fix
-
 	CH_COUNT
 };
 
@@ -147,15 +150,17 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
-FDCAN_RxHeaderTypeDef   RxHeader;
-uint8_t               RxData[8];
-int count = 0;
-uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
-uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
-uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
-wheel_data_s_t frw, flw, rlw, rrw;
-uint8_t testNo = 0;
-
+FDCAN_RxHeaderTypeDef	RxHeader;
+uint8_t               	RxData[8];
+volatile uint32_t count = 0;
+volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
+volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
+volatile uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
+volatile wheel_data_s_t frw, flw, rlw, rrw;
+volatile uint8_t testNo = 0;
+volatile uint8_t canFifoFull = 0;
+volatile uint8_t drs = 0;
+volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -169,7 +174,11 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
-    count = 1;
+    canFifoFull = 0;
+    count += 1;
+    if (count > 900000) {
+    	count = 0;
+    }
     switch(RxHeader.Identifier) {
     case 0x360:
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
@@ -203,6 +212,14 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
     	break;
+    case 0x367:
+    	drs = RxData[0];
+    	break;
+    case 0x368:
+    	brakeFluid = RxData[0] << 8 | RxData[1];
+    	throttleLoad = RxData[2] << 8 | RxData[3];
+    	brakeLoad = RxData[4] << 8 | RxData[5];
+    	break;
     case 0x4e2:
     	flsg = RxData[0] << 8 | RxData[1];
     	break;
@@ -225,6 +242,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       //Error_Handler();
     }
   }
+  else if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_FULL) != RESET) {
+	  canFifoFull = 1;
+	  HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_FULL, 0);
+  }
 }
 
 int _write( int file, char *ptr, int len )
@@ -238,6 +259,8 @@ void SWD_Init(void)
 {
 	*(__IO uint32_t*) (0x5C003010) = ((SystemCoreClock / 2 / 2000000) - 1);
 }
+
+
 /* USER CODE END 0 */
 
 /**
@@ -279,9 +302,12 @@ int main(void)
   MX_FDCAN3_Init();
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
+
   GNSS_Init(&GNSS_Handle, &huart9);
+  GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
-  //GNSS_LoadConfig(&GNSS_Handle);
+  GNSS_ParseBuffer(&GNSS_Handle);
+  //GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -368,6 +394,22 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
+	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
+	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
+
+	  static uint32_t GPS_Timer = 0;
+	  if ((HAL_GetTick() - GPS_Timer) > 900) {
+		  GNSS_ParseBuffer(&GNSS_Handle);
+		  GNSS_GetPVTData(&GNSS_Handle);
+
+		  loggerEmplaceU32(logBuffer, GPS_LON, GNSS_Handle.lon);
+		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
+		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
+		  GPS_Timer = HAL_GetTick();
+	  }
+
+	  logBuffer[DRS] = drs;
 	  logBuffer[TESTNO] = testNo;
 
 	  static uint32_t usbTimeout = 0;
@@ -376,39 +418,47 @@ int main(void)
 		  adcEnable();
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6), count);
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\tCAN received: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7), count);
+			  sprintf(msg, "AIN%c: %dr\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 's':
 			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'i':
+			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
+		  case 'c':
+			  sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'a':
@@ -445,44 +495,31 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  usbBuffer[0] = 'm';
 			  break;
+		  case 'g':
+			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
+				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+				  GNSS_Handle.lon, GNSS_Handle.lat
+				  );
+		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  default:
-			  sprintf(msg, "no channel selected\tCAN received: %d\r\n", count);
+			  sprintf(msg, "no channel selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  }
 		  adcDisable();
 	  }
 
-
-	  //sprintf(msg, "AIN2: %d\tCAN msgs received: %d\r\n", fbp, count);
-	  //CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-
-
 	  uint32_t time = HAL_GetTick();
 	  loggerEmplaceU32(logBuffer, TS, time);
-	  //HAL_Delay(2);
 	  if(f_write(&file, &logBuffer, sizeof(logBuffer), &wbytes) == FR_OK) {
 		  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  }
 	  f_sync(&file);
 
-/*
-		if ((HAL_GetTick() - Timer) > 1000) {
-			GNSS_GetUniqID(&GNSS_Handle);
-			GNSS_ParseBuffer(&GNSS_Handle);
-			HAL_Delay(250);
-			GNSS_GetPVTData(&GNSS_Handle);
-			GNSS_ParseBuffer(&GNSS_Handle);
 
-			sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tID: %04x%04x%04x%04x\r\n", GNSS_Handle.fixType,
-					GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
-					GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-					GNSS_Handle.uniqueID[0], GNSS_Handle.uniqueID[1], GNSS_Handle.uniqueID[2], GNSS_Handle.uniqueID[3]
-					);
-			CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			Timer = HAL_GetTick();
-		}
-		*/
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -581,7 +618,7 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.MessageRAMOffset = 0;
   hfdcan3.Init.StdFiltersNbr = 1;
   hfdcan3.Init.ExtFiltersNbr = 0;
-  hfdcan3.Init.RxFifo0ElmtsNbr = 32;
+  hfdcan3.Init.RxFifo0ElmtsNbr = 64;
   hfdcan3.Init.RxFifo0ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.RxFifo1ElmtsNbr = 0;
   hfdcan3.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
@@ -598,7 +635,7 @@ static void MX_FDCAN3_Init(void)
   }
   /* USER CODE BEGIN FDCAN3_Init 2 */
 
-
+  HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan3, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_OVERWRITE);
   canFilter.IdType = FDCAN_STANDARD_ID;
   canFilter.FilterIndex = 0;
   canFilter.FilterType = FDCAN_FILTER_RANGE;
@@ -614,14 +651,12 @@ static void MX_FDCAN3_Init(void)
 	  Error_Handler();
 	}
 
-  HAL_StatusTypeDef ret = HAL_OK;
-  //ret = HAL_FDCAN_RegisterRxFifo0Callback(&hfdcan3, )
-
   if (HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
   {
     /* Notification Error */
     Error_Handler();
   }
+  HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN3_Init 2 */
 
 }
@@ -813,7 +848,7 @@ static void MX_UART9_Init(void)
 
   /* USER CODE END UART9_Init 1 */
   huart9.Instance = UART9;
-  huart9.Init.BaudRate = 9600;
+  huart9.Init.BaudRate = 38400;
   huart9.Init.WordLength = UART_WORDLENGTH_8B;
   huart9.Init.StopBits = UART_STOPBITS_1;
   huart9.Init.Parity = UART_PARITY_NONE;
