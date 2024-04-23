@@ -115,6 +115,7 @@ enum LogChannel {
 	GPS_LON, GPS_LON1, GPS_LON2, GPS_LON3,
 	GPS_LAT, GPS_LAT1, GPS_LAT2, GPS_LAT3,
 	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
+	GPS_FIX,
 	TESTNO,
 	CH_COUNT
 };
@@ -180,6 +181,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	count = 0;
     }
     switch(RxHeader.Identifier) {
+    case 0x35F:
+    	drs = RxData[0];
+    	break;
     case 0x360:
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	yAccel = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
@@ -211,9 +215,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
-    	break;
-    case 0x367:
-    	drs = RxData[0];
     	break;
     case 0x368:
     	brakeFluid = RxData[0] << 8 | RxData[1];
@@ -406,6 +407,7 @@ int main(void)
 		  loggerEmplaceU32(logBuffer, GPS_LON, GNSS_Handle.lon);
 		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
 		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
+		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
 	  }
 
@@ -446,7 +448,7 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %dr\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 's':
@@ -503,8 +505,12 @@ int main(void)
 				  );
 		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
+		  case 'b':
+			  sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
+			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+			  break;
 		  default:
-			  sprintf(msg, "no channel selected\r\n");
+			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  }
