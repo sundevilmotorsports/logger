@@ -75,6 +75,11 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
+//DTC Bitwise Macros for Updating the Code Status
+#define SET_DTC   (container, index)   (container.dtcCodes[(index) / 32] |= (1U << ((index) % 32)))
+#define CLEAR_DTC (container, index)   (container.dtcCodes[(index) / 32] &= ~(1U << ((index) % 32)))
+#define CHECK_DTC (container, index)   (container.dtcCodes[(index) / 32] & (1U << ((index) % 32)))
+
 
 enum LogChannel {
 	TS, TS1, TS2, TS3, // timestamp (ms)
@@ -154,6 +159,83 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
+
+//DTC Codes
+typedef struct {
+    uint32_t dtcCodes[1]; // Single 32-bit integer to store 25 bits
+} dtc_code_handler;
+volatile dtc_code_handler DTC_Error_State;
+
+uint32_t DTC_Error_Check(){return DTC_Error_State.dtcCodes;}
+
+//Author of this awful struct: Alex Rumer, the first year (Who let him touch the Datalogger code? ¯\_(ツ)_/¯ )
+#pragma pack(push, 1) //Pushes storage boundary to single bit for best storage efficiency
+typedef struct {
+	uint8_t init:1; //Limits Storage to a single bit address
+	uint8_t errState:1; //Limits Storage to a single bit address
+	uint8_t DTC_Code_Index:5; //Limits Storage to 5 bit addresses maximizing the value at 32
+	//Corresponds to the 32 addresses in the DTC Code Handler
+
+	uint8_t measures; // Goal Number of Measurements to Calculate Average Response Time (MAX: 256)
+	uint8_t i; //Actual Memory Allocation for number of Messages Received from CAN ID
+
+	uint32_t totalTime; //Time (ms) from Last Average Response Time Calculation
+	//This data can be received from the CAN_RDTxR register (I copied the data type hehe)
+	uint32_t prevTime;
+
+	uint32_t avgResponse; //Store the calculated average response time
+	uint8_t percentOver; //Store the percentage of avg response time over allowed before throwing an error
+
+
+}can_dtc; //This name needs work I know...
+#pragma pack(pop) // Restores default STM32 Byte Padding
+
+void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time){
+	data->init = 1;
+	data->i = 0;
+	data->errState = 0;
+	data->measures = measures;
+	data->prevTime = start_time;
+	data->percentOver = percentage_over_allowed;
+	data->DTC_Code_Index = index&0x1F; //Bitwise Operation Ensures Index never exceeds 32 and limits Memory Useage
+	return;
+}
+//
+void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
+	uint32_t currentTime = time - data->prevTime;
+
+	if(currentTime > data->avgResponse * (1 + data->prevTime/100)){
+		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
+	}
+}
+void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
+	data->i++;
+	data->totalTime += msgTime - data->prevTime;
+	data->prevTime = msgTime;
+	return;
+}
+void CAN_DTC_Response_Update(can_dtc *data){
+	if(data->i > 0 && data->init && !data->err){
+		data->avgResponse = data->totalTime/data->i;
+	}
+	data->i         = 0;
+	data->totalTime = 0;
+
+	return;
+}
+
+volatile can_dtc frwDTC, flwDTC, rrwDTC, rlwDTC;
+
+void DTC_Init(uint32_t start_time){
+	CAN_DTC_Init(frwDTC, 0, 10, 25, start_time);
+	CAN_DTC_Init(flwDTC, 1, 10, 25, start_time);
+	CAN_DTC_Init(rrwDTC, 2, 10, 25, start_time);
+	CAN_DTC_Init(rlwDTC, 3, 10, 25, start_time);
+	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
+}
+
+
+
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
 volatile uint32_t count = 0;
@@ -203,21 +285,36 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	flw.rpm = RxData[0] << 8 | RxData[1];
     	flw.objTemp = RxData[2] << 8 | RxData[3];
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(count%6 == 0){
+    		CAN_DTC_State_Update(flwDTC, HAL_GetTick());
+
+    	}
     	break;
     case 0x364:
     	frw.rpm = RxData[0] << 8 | RxData[1];
     	frw.objTemp = RxData[2] << 8 | RxData[3];
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(count%6 == 0) CAN_DTC_State_Update(frwDTC, HAL_GetTick());
     	break;
     case 0x365:
     	rrw.rpm = RxData[0] << 8 | RxData[1];
     	rrw.objTemp = RxData[2] << 8 | RxData[3];
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(count%6 == 0) CAN_DTC_State_Update(rrwDTC, HAL_GetTick());
     	break;
     case 0x366:
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(count%6 == 0) CAN_DTC_State_Update(rlwDTC, HAL_GetTick());
     	break;
     case 0x368:
     	brakeFluid = RxData[0] << 8 | RxData[1];
@@ -310,6 +407,10 @@ int main(void)
   MX_FDCAN2_Init();
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
+
+  //Initialize DTC subsystem
+  DTC_Init(HAL_GetTick());
+
 
   GNSS_Init(&GNSS_Handle, &huart9);
   GNSS_GetUniqID(&GNSS_Handle);
