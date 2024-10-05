@@ -227,7 +227,7 @@ void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
 	uint32_t currentTime = time - data->prevTime;
 	CAN_DTC_Response_Update(data);
 
-	if(currentTime > data->avgResponse * (1 + data->prevTime/100)){
+	if(currentTime > data->avgResponse * (1 + data->percentOver/100)){
 		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
 	}
 	return;
@@ -245,7 +245,11 @@ void CAN_DTC_Check(can_dtc *data, uint32_t time){
 	}
 }
 
-can_dtc *frwDTC, *flwDTC, *rrwDTC, *rlwDTC;
+can_dtc frwDTC_instance, flwDTC_instance, rrwDTC_instance, rlwDTC_instance;
+can_dtc *frwDTC = &frwDTC_instance;
+can_dtc *flwDTC = &flwDTC_instance;
+can_dtc *rrwDTC = &rrwDTC_instance;
+can_dtc *rlwDTC = &rlwDTC_instance;
 
 void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(frwDTC, 0, 10, 25, start_time);
