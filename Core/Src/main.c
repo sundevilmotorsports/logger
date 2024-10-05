@@ -184,7 +184,7 @@ typedef struct {
 	//Corresponds to the 32 addresses in the DTC Code Handler
 
 	uint8_t measures; // Goal Number of Measurements to Calculate Average Response Time (MAX: 256)
-	uint8_t i; //Actual Memory Allocation for number of Messages Received from CAN ID
+	uint8_t bufferIndex; //Actual Memory Allocation for number of Messages Received from CAN ID
 
 	uint32_t totalTime; //Time (ms) from Last Average Response Time Calculation
 	//This data can be received from the CAN_RDTxR register (I copied the data type hehe)
@@ -192,38 +192,58 @@ typedef struct {
 
 	uint32_t avgResponse; //Store the calculated average response time
 	uint8_t percentOver; //Store the percentage of avg response time over allowed before throwing an error
+	uint32_t *timeBuffer;
 
 
 }can_dtc; //This name needs work I know...
 #pragma pack(pop) // Restores default STM32 Byte Padding
 
+//Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
 void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time){
 	data->init = 0;
-	data->i = 0;
+	data->bufferIndex = 0;
 	data->errState = 0;
 	data->measures = measures;
 	data->totalTime = start_time;
 	data->prevTime = start_time;
 	data->percentOver = percentage_over_allowed;
 	data->DTC_Code_Index = index&0x1F; //Bitwise Operation Ensures Index never exceeds 32 and limits Memory Useage
-	return;
-}
-//
-void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
-	data->i++;
-	data->totalTime += msgTime - data->prevTime;
-	data->prevTime = msgTime;
-	return;
-}
-void CAN_DTC_Response_Update(can_dtc *data){
-	if(data->i > 0 && data->init && !data->errState){
-		data->avgResponse = data->totalTime/data->i;
-	}
-	data->i         = 0;
-	data->totalTime = 0;
 
+	//Circular Buffer to Ensure a Rolling Average
+	data->timeBuffer = (uint32_t *)malloc(measures * sizeof(uint32_t));
+    for (int i = 0; i < measures; i++) {
+        data->timeBuffer[i] = 0;
+    }
 	return;
 }
+
+//Update the measurement state of the CAN DTC handler
+void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
+    uint32_t interval = msgTime - data->prevTime;
+    data->prevTime = msgTime;
+
+    // Update the total time by subtracting the oldest value and adding the new interval
+    data->totalTime = data->totalTime - data->timeBuffer[data->bufferIndex] + interval;
+
+    // Store the new interval in the buffer
+    data->timeBuffer[data->bufferIndex] = interval;
+
+    // Update the buffer index
+    data->bufferIndex = (data->bufferIndex + 1) % data->measures;
+	return;
+}
+
+//Update the Average Response Measurement of the CAN DTC handler
+void CAN_DTC_Response_Update(can_dtc *data){
+	//Error and Value Checking
+	if(data->init && !data->errState){
+		//Calculate Average Response Time
+		data->avgResponse = data->totalTime/data->measures;
+	}
+	return;
+}
+
+//Check if the CAN device has not responded lately, if not send an Error code to the DTC
 void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
 	uint32_t currentTime = time - data->prevTime;
 	CAN_DTC_Response_Update(data);
@@ -233,19 +253,22 @@ void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
 	}
 	return;
 }
-void CAN_DTC_Check(can_dtc *data, uint32_t time){
-	if(data->init){
-		CAN_DTC_State_Update(data, time);
-		if(data->i >= data->measures){
-			CAN_DTC_Error_Update(data, time);
-		}
-	}else{
-		CAN_DTC_State_Update(data, time);
-		CAN_DTC_Response_Update(data);
-		data->init = 1;
-	}
+
+//Simplified checking logic for switch case checks
+void CAN_DTC_Update_All(can_dtc *data, uint32_t time) {
+    if (data->init) {
+        CAN_DTC_State_Update(data, time);
+        if (data->bufferIndex == 0) { // Update the average when the buffer is full
+            CAN_DTC_Response_Update(data);
+        }
+    } else {
+        CAN_DTC_State_Update(data, time);
+        data->avgResponse = data->totalTime; // Calculate initial average after first message
+        data->init = 1; // Set the init flag
+    }
 }
 
+//Initialize Wheel Board DTC handlers and allocate memory
 can_dtc frwDTC_instance, flwDTC_instance, rrwDTC_instance, rlwDTC_instance;
 can_dtc *frwDTC = &frwDTC_instance;
 can_dtc *flwDTC = &flwDTC_instance;
@@ -258,9 +281,19 @@ void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(rrwDTC, 2, 10, 25, start_time);
 	CAN_DTC_Init(rlwDTC, 3, 10, 25, start_time);
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
+	return;
+}
+void DTC_Error_All(uint32_t time){
+	CAN_DTC_Error_Update(frwDTC, time);
+	CAN_DTC_Error_Update(flwDTC, time);
+	CAN_DTC_Error_Update(rrwDTC, time);
+	CAN_DTC_Error_Update(rlwDTC, time);
+	return;
+
 }
 
 const uint32_t DTC_CHECK_INTERVAL = 20;
+uint32_t DTC_PREV_CHECK_TIME = 0;
 
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
@@ -314,7 +347,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - flwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(flwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - flwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(flwDTC, HAL_GetTick());
 
     	break;
     case 0x364:
@@ -323,7 +356,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - frwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(frwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - frwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(frwDTC, HAL_GetTick());
 
     	break;
     case 0x365:
@@ -332,7 +365,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - rrwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rrwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rrwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rrwDTC, HAL_GetTick());
 
     	break;
     case 0x366:
@@ -341,7 +374,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rlwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlwDTC, HAL_GetTick());
 
     	break;
     case 0x368:
@@ -489,6 +522,11 @@ int main(void)
 
   while (1)
   {
+	  //Check the Error State of all the DTC devices at 50 Hz
+	  if(HAL_GetTick() - DTC_PREV_CHECK_TIME >= DTC_CHECK_INTERVAL ){
+		  DTC_Error_All(HAL_GetTick());
+		  DTC_PREV_CHECK_TIME = HAL_GetTick();
+	  }
 	  adcEnable();
 	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_FBP));
 	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_RBP));
