@@ -162,7 +162,8 @@ typedef struct {
     uint32_t dtcCodes[1]; // Single 32-bit integer to store 25 bits
 } dtc_code_handler;
 
-volatile dtc_code_handler* DTC_Error_State = {0};
+volatile dtc_code_handler DTC_Error_State_instance = {0};
+volatile dtc_code_handler* DTC_Error_State = &DTC_Error_State_instance;
 
 // DTC Bitwise Macros for Updating the Code Status
 #define SET_DTC(container, index)   ((container)->dtcCodes[(index) / 32] |= (1U << ((index) % 32)))
