@@ -123,6 +123,7 @@ enum LogChannel {
 	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	GPS_FIX,
 	TESTNO,
+	FLW_DTC, FRW_DTC, RLW_DTC, RRW_DTC,
 	CH_COUNT
 };
 
@@ -191,23 +192,17 @@ typedef struct {
 #pragma pack(pop) // Restores default STM32 Byte Padding
 
 void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time){
-	data->init = 1;
+	data->init = 0;
 	data->i = 0;
 	data->errState = 0;
 	data->measures = measures;
+	data->totalTime = start_time;
 	data->prevTime = start_time;
 	data->percentOver = percentage_over_allowed;
 	data->DTC_Code_Index = index&0x1F; //Bitwise Operation Ensures Index never exceeds 32 and limits Memory Useage
 	return;
 }
 //
-void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
-	uint32_t currentTime = time - data->prevTime;
-
-	if(currentTime > data->avgResponse * (1 + data->prevTime/100)){
-		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
-	}
-}
 void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
 	data->i++;
 	data->totalTime += msgTime - data->prevTime;
@@ -223,6 +218,27 @@ void CAN_DTC_Response_Update(can_dtc *data){
 
 	return;
 }
+void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
+	uint32_t currentTime = time - data->prevTime;
+	CAN_DTC_Response_Update(data);
+
+	if(currentTime > data->avgResponse * (1 + data->prevTime/100)){
+		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
+	}
+	return;
+}
+void CAN_DTC_Check(can_dtc *data, uint32_t time){
+	if(data->init){
+		CAN_DTC_State_Update(data, time);
+		if(data->i >= data->measures){
+			CAN_DTC_Error_Update(data, time);
+		}
+	}else{
+		CAN_DTC_State_Update(data, time);
+		CAN_DTC_Response_Update(data);
+		data->init = 1;
+	}
+}
 
 volatile can_dtc frwDTC, flwDTC, rrwDTC, rlwDTC;
 
@@ -234,7 +250,7 @@ void DTC_Init(uint32_t start_time){
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 }
 
-
+const uint32_t DTC_CHECK_INTERVAL = 20;
 
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
@@ -262,6 +278,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     // do things with data
     canFifoFull = 0;
     count += 1;
+
     if (count > 900000) {
     	count = 0;
     }
@@ -287,10 +304,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(count%6 == 0){
-    		CAN_DTC_State_Update(flwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - flwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(flwDTC, HAL_GetTick());
 
-    	}
     	break;
     case 0x364:
     	frw.rpm = RxData[0] << 8 | RxData[1];
@@ -298,7 +313,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(count%6 == 0) CAN_DTC_State_Update(frwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - frwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(frwDTC, HAL_GetTick());
+
     	break;
     case 0x365:
     	rrw.rpm = RxData[0] << 8 | RxData[1];
@@ -306,7 +322,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(count%6 == 0) CAN_DTC_State_Update(rrwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rrwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rrwDTC, HAL_GetTick());
+
     	break;
     case 0x366:
     	rlw.rpm = RxData[0] << 8 | RxData[1];
@@ -314,7 +331,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(count%6 == 0) CAN_DTC_State_Update(rlwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rlwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rlwDTC, HAL_GetTick());
+
     	break;
     case 0x368:
     	brakeFluid = RxData[0] << 8 | RxData[1];
@@ -506,6 +524,11 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
+
+	  loggerEmplaceU16(logBuffer, FLW_DTC, DTC_Error_State[0]);
+	  loggerEmplaceU16(logBuffer, FRW_DTC, DTC_Error_State[1]);
+	  loggerEmplaceU16(logBuffer, RRW_DTC, DTC_Error_State[2]);
+	  loggerEmplaceU16(logBuffer, RLW_DTC, DTC_Error_State[3]);
 
 	  static uint32_t GPS_Timer = 0;
 	  if ((HAL_GetTick() - GPS_Timer) > 900) {
