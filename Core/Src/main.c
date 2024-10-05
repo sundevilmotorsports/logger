@@ -75,10 +75,6 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
-//DTC Bitwise Macros for Updating the Code Status
-#define SET_DTC   (container, index)   (container.dtcCodes[(index) / 32] |= (1U << ((index) % 32)))
-#define CLEAR_DTC (container, index)   (container.dtcCodes[(index) / 32] &= ~(1U << ((index) % 32)))
-#define CHECK_DTC (container, index)   (container.dtcCodes[(index) / 32] & (1U << ((index) % 32)))
 
 
 enum LogChannel {
@@ -165,9 +161,18 @@ typedef struct {
 typedef struct {
     uint32_t dtcCodes[1]; // Single 32-bit integer to store 25 bits
 } dtc_code_handler;
-volatile dtc_code_handler DTC_Error_State;
 
-uint32_t DTC_Error_Check(){return DTC_Error_State.dtcCodes;}
+volatile dtc_code_handler* DTC_Error_State = {0};
+
+// DTC Bitwise Macros for Updating the Code Status
+#define SET_DTC(container, index)   ((container)->dtcCodes[(index) / 32] |= (1U << ((index) % 32)))
+#define CLEAR_DTC(container, index) ((container)->dtcCodes[(index) / 32] &= ~(1U << ((index) % 32)))
+#define CHECK_DTC(container, index) ((container)->dtcCodes[(index) / 32] & (1U << ((index) % 32)))
+
+// Function to return the DTC error state
+volatile uint32_t* DTC_Error_Check() {
+    return DTC_Error_State->dtcCodes;
+}
 
 //Author of this awful struct: Alex Rumer, the first year (Who let him touch the Datalogger code? ¯\_(ツ)_/¯ )
 #pragma pack(push, 1) //Pushes storage boundary to single bit for best storage efficiency
@@ -210,7 +215,7 @@ void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
 	return;
 }
 void CAN_DTC_Response_Update(can_dtc *data){
-	if(data->i > 0 && data->init && !data->err){
+	if(data->i > 0 && data->init && !data->errState){
 		data->avgResponse = data->totalTime/data->i;
 	}
 	data->i         = 0;
@@ -240,7 +245,7 @@ void CAN_DTC_Check(can_dtc *data, uint32_t time){
 	}
 }
 
-volatile can_dtc frwDTC, flwDTC, rrwDTC, rlwDTC;
+can_dtc *frwDTC, *flwDTC, *rrwDTC, *rlwDTC;
 
 void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(frwDTC, 0, 10, 25, start_time);
@@ -304,7 +309,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - flwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(flwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - flwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(flwDTC, HAL_GetTick());
 
     	break;
     case 0x364:
@@ -313,7 +318,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - frwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(frwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - frwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(frwDTC, HAL_GetTick());
 
     	break;
     case 0x365:
@@ -322,7 +327,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - rrwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rrwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rrwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rrwDTC, HAL_GetTick());
 
     	break;
     case 0x366:
@@ -331,7 +336,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
 
     	//If statement ensures update runs only at 50Hz
-    	if(HAL_GetTick() - rlwDTC.prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rlwDTC, HAL_GetTick());
+    	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Check(rlwDTC, HAL_GetTick());
 
     	break;
     case 0x368:
@@ -525,10 +530,10 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
-	  loggerEmplaceU16(logBuffer, FLW_DTC, DTC_Error_State[0]);
-	  loggerEmplaceU16(logBuffer, FRW_DTC, DTC_Error_State[1]);
-	  loggerEmplaceU16(logBuffer, RRW_DTC, DTC_Error_State[2]);
-	  loggerEmplaceU16(logBuffer, RLW_DTC, DTC_Error_State[3]);
+	  loggerEmplaceU16(logBuffer, FLW_DTC, CHECK_DTC(DTC_Error_State, 0));
+	  loggerEmplaceU16(logBuffer, FRW_DTC, CHECK_DTC(DTC_Error_State, 1));
+	  loggerEmplaceU16(logBuffer, RRW_DTC, CHECK_DTC(DTC_Error_State, 2));
+	  loggerEmplaceU16(logBuffer, RLW_DTC, CHECK_DTC(DTC_Error_State, 3));
 
 	  static uint32_t GPS_Timer = 0;
 	  if ((HAL_GetTick() - GPS_Timer) > 900) {
