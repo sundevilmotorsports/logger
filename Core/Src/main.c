@@ -119,7 +119,12 @@ enum LogChannel {
 	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	GPS_FIX,
 	TESTNO,
-	FLW_DTC, FRW_DTC, RLW_DTC, RRW_DTC,
+	DTC_FLW, DTC_FRW,
+	DTC_RLW, DTC_RRW,
+	DTC_FBP, DTC_RBP,
+	DTC_STP, DTC_FLS,
+	DTC_FRS, DTC_RLS,
+	DTC_RRS,
 	CH_COUNT
 };
 
@@ -275,11 +280,25 @@ can_dtc *flwDTC = &flwDTC_instance;
 can_dtc *rrwDTC = &rrwDTC_instance;
 can_dtc *rlwDTC = &rlwDTC_instance;
 
+
+//Defining the DTC Storage Index for each recorded DTC device
+uint8_t DTC_Index_frWheelBoard = 0;
+uint8_t DTC_Index_flWheelBoard = 1;
+uint8_t DTC_Index_rrWheelBoard = 2;
+uint8_t DTC_Index_rlWheelBoard = 3;
+uint8_t DTC_Index_fBrakePress = 4;
+uint8_t DTC_Index_rBrakePress = 5;
+uint8_t DTC_Index_steer = 6;
+uint8_t DTC_Index_flShock = 7;
+uint8_t DTC_Index_frShock = 8;
+uint8_t DTC_Index_rlShock = 9;
+uint8_t DTC_Index_rrShock = 10;
+
 void DTC_Init(uint32_t start_time){
-	CAN_DTC_Init(frwDTC, 0, 10, 25, start_time);
-	CAN_DTC_Init(flwDTC, 1, 10, 25, start_time);
-	CAN_DTC_Init(rrwDTC, 2, 10, 25, start_time);
-	CAN_DTC_Init(rlwDTC, 3, 10, 25, start_time);
+	CAN_DTC_Init(frwDTC, DTC_Index_frWheelBoard, 10, 25, start_time);
+	CAN_DTC_Init(flwDTC, DTC_Index_flWheelBoard, 10, 25, start_time);
+	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 10, 25, start_time);
+	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 10, 25, start_time);
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
 }
@@ -306,6 +325,18 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
+
+ADC_Result fBrakePress;
+ADC_Result rBrakePress;
+ADC_Result steer;
+ADC_Result flShock;
+ADC_Result frShock;
+ADC_Result rrShock;
+ADC_Result rlShock;
+
+
+
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -342,6 +373,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
     	break;
     case 0x363:
+    	//Front Left Wheel Board
     	flw.rpm = RxData[0] << 8 | RxData[1];
     	flw.objTemp = RxData[2] << 8 | RxData[3];
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
@@ -351,6 +383,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     	break;
     case 0x364:
+    	//Front Right Wheel Board
     	frw.rpm = RxData[0] << 8 | RxData[1];
     	frw.objTemp = RxData[2] << 8 | RxData[3];
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
@@ -360,6 +393,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     	break;
     case 0x365:
+    	//Rear Right Wheel Board
     	rrw.rpm = RxData[0] << 8 | RxData[1];
     	rrw.objTemp = RxData[2] << 8 | RxData[3];
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
@@ -369,6 +403,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     	break;
     case 0x366:
+    	//Rear Left Wheel Board
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
@@ -378,20 +413,25 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 
     	break;
     case 0x368:
+    	//Brake Fluid, Throttle Load, and Brake Load
     	brakeFluid = RxData[0] << 8 | RxData[1];
     	throttleLoad = RxData[2] << 8 | RxData[3];
     	brakeLoad = RxData[4] << 8 | RxData[5];
     	break;
     case 0x4e2:
+    	//Front Left String Gauge
     	flsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e3:
+    	//Front Right String Gauge
     	frsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e4:
+    	//Rear Right String Gauge
     	rrsg = RxData[0] << 8 | RxData[1];
     	break;
     case 0x4e5:
+    	//Rear Left String Gauge
     	rlsg = RxData[0] << 8 | RxData[1];
     	break;
     }
@@ -524,22 +564,52 @@ int main(void)
   {
 	  //Check the Error State of all the DTC devices at 50 Hz
 	  if(HAL_GetTick() - DTC_PREV_CHECK_TIME >= DTC_CHECK_INTERVAL ){
+		  //Check CAN Device Response
 		  DTC_Error_All(HAL_GetTick());
+
+		  //Check Analog Device Response
+		  if(fBrakePress.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_fBrakePress);
+		  if(rBrakePress.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_rBrakePress);
+		  if(steer.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_steer);
+		  if(flShock.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_flShock);
+		  if(frShock.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_frShock);
+		  if(rlShock.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_rlShock);
+		  if(rrShock.error!=HAL_OK) SET_DTC(DTC_Error_State, DTC_Index_rrShock);
+
+		  //Update Last Check Time
 		  DTC_PREV_CHECK_TIME = HAL_GetTick();
 	  }
+
+	  //Start Analog Listening
 	  adcEnable();
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_FBP));
-	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_RBP));
-	  loggerEmplaceU16(logBuffer, STEERING, eGetAnalog(&hspi4, ADC_STP));
-	  loggerEmplaceU16(logBuffer, FLSHOCK, eGetAnalog(&hspi4, ADC_FLS));
-	  loggerEmplaceU16(logBuffer, FRSHOCK, eGetAnalog(&hspi4, ADC_FRS));
-	  loggerEmplaceU16(logBuffer, RRSHOCK, eGetAnalog(&hspi4, ADC_RRS));
-	  loggerEmplaceU16(logBuffer, RLSHOCK, eGetAnalog(&hspi4, ADC_RLS));
+
+	  //Receive Analog Sensor Data and Store
+	  fBrakePress = eGetAnalog(&hspi4, ADC_FBP);
+	  rBrakePress = eGetAnalog(&hspi4, ADC_RBP);
+	  steer = eGetAnalog(&hspi4, ADC_STP);
+	  flShock = eGetAnalog(&hspi4, ADC_FLS);
+	  frShock = eGetAnalog(&hspi4, ADC_FRS);
+	  rrShock = eGetAnalog(&hspi4, ADC_RRS);
+	  rlShock = eGetAnalog(&hspi4, ADC_RLS);
+
+
+	  //Log Analog Sensor Data
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fBrakePress.value);
+	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, rBrakePress.value);
+	  loggerEmplaceU16(logBuffer, STEERING, steer.value);
+	  loggerEmplaceU16(logBuffer, FLSHOCK, flShock.value);
+	  loggerEmplaceU16(logBuffer, FRSHOCK, frShock.value);
+	  loggerEmplaceU16(logBuffer, RRSHOCK, rrShock.value);
+	  loggerEmplaceU16(logBuffer, RLSHOCK, rlShock.value);
+
+	  //Stop Analog Listening
 	  adcDisable();
 
+	  //Report Battery Current and Voltage
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
 	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
 
+	  //Report IMU Data
 	  loggerEmplaceU32(logBuffer, IMU_X_ACCEL, xAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
@@ -548,6 +618,7 @@ int main(void)
 	  loggerEmplaceU32(logBuffer, IMU_Y_GYRO, yGyro);
 	  loggerEmplaceU32(logBuffer, IMU_Z_GYRO, zGyro);
 
+	  //Report Wheel Board Sensor Data
 	  loggerEmplaceU16(logBuffer, FLW_AMB, flw.ambTemp);
 	  loggerEmplaceU16(logBuffer, FLW_OBJ, flw.objTemp);
 	  loggerEmplaceU16(logBuffer, FLW_RPM, flw.rpm);
@@ -564,19 +635,31 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RLW_OBJ, rlw.objTemp);
 	  loggerEmplaceU16(logBuffer, RLW_RPM, rlw.rpm);
 
+	  //Report String Gauge Data
 	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
 	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  //Report Brakes and Throttle
 	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
-	  loggerEmplaceU16(logBuffer, FLW_DTC, CHECK_DTC(DTC_Error_State, 0));
-	  loggerEmplaceU16(logBuffer, FRW_DTC, CHECK_DTC(DTC_Error_State, 1));
-	  loggerEmplaceU16(logBuffer, RRW_DTC, CHECK_DTC(DTC_Error_State, 2));
-	  loggerEmplaceU16(logBuffer, RLW_DTC, CHECK_DTC(DTC_Error_State, 3));
+	  //Report DTC Data
+	  loggerEmplaceU16(logBuffer, DTC_FLW, CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_FRW, CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_RRW, CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_RLW, CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_FBP, CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress));
+    loggerEmplaceU16(logBuffer, DTC_RBP, CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress));
+    loggerEmplaceU16(logBuffer, DTC_STP, CHECK_DTC(DTC_Error_State, DTC_Index_steer));
+    loggerEmplaceU16(logBuffer, DTC_FLS, CHECK_DTC(DTC_Error_State, DTC_Index_flShock));
+    loggerEmplaceU16(logBuffer, DTC_FRS, CHECK_DTC(DTC_Error_State, DTC_Index_frShock));
+    loggerEmplaceU16(logBuffer, DTC_RRS, CHECK_DTC(DTC_Error_State, DTC_Index_rrShock));
+    loggerEmplaceU16(logBuffer, DTC_RLS, CHECK_DTC(DTC_Error_State, DTC_Index_rlShock));
+
+
 
 	  static uint32_t GPS_Timer = 0;
 	  if ((HAL_GetTick() - GPS_Timer) > 900) {
@@ -599,35 +682,35 @@ int main(void)
 		  adcEnable();
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 's':

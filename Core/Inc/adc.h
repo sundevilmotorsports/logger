@@ -25,7 +25,13 @@
 void adcInit();
 void adcEnable();
 void adcDisable();
+
+typedef struct {
+    uint16_t value;
+    HAL_StatusTypeDef error;
+} ADC_Result;
+
 uint16_t getAnalog(SPI_HandleTypeDef* hspi, uint8_t channel);
-uint16_t eGetAnalog(SPI_HandleTypeDef* hspi, uint8_t channel);
+ADC_Result eGetAnalog(SPI_HandleTypeDef* hspi, uint8_t channel);
 
 #endif /* INC_ADC_H_ */
