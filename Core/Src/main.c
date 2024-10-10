@@ -125,9 +125,9 @@ enum LogChannel {
 	DTC_STP, DTC_FLS,
 	DTC_FRS, DTC_RLS,
 	DTC_RRS, DTC_FLSG,
-  DTC_FRSG, DTC_RLSG,
-  DTC_RRSG, DTC_IMU,
-  DTC_BNT,
+	DTC_FRSG, DTC_RLSG,
+	DTC_RRSG, DTC_IMU,
+	DTC_BNT,
 	CH_COUNT
 };
 
@@ -336,16 +336,16 @@ void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 10, 25, start_time);
 
   //String Gauge DTC Handlers
-  CAN_DTC_Init(flsDTC, DTC_Index_flStringGauge, 10, 25, start_time);
-  CAN_DTC_Init(frsDTC, DTC_Index_frStringGauge, 10, 25, start_time);
-  CAN_DTC_Init(rlsDTC, DTC_Index_rlStringGauge, 10, 25, start_time);
-  CAN_DTC_Init(rrsDTC, DTC_Index_rrStringGauge, 10, 25, start_time);
+	CAN_DTC_Init(flsDTC, DTC_Index_flStringGauge, 10, 25, start_time);
+	CAN_DTC_Init(frsDTC, DTC_Index_frStringGauge, 10, 25, start_time);
+	CAN_DTC_Init(rlsDTC, DTC_Index_rlStringGauge, 10, 25, start_time);
+	CAN_DTC_Init(rrsDTC, DTC_Index_rrStringGauge, 10, 25, start_time);
 
-  //IMU DTC Handler
-  CAN_DTC_Init(imuDTC, DTC_Index_IMU, 10, 25, start_time);
+	//IMU DTC Handler
+	CAN_DTC_Init(imuDTC, DTC_Index_IMU, 10, 25, start_time);
 
-  //Brake and Throttle DTC Handler
-  CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
+	//Brake and Throttle DTC Handler
+	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
 
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
@@ -355,12 +355,12 @@ void DTC_Error_All(uint32_t time){
 	CAN_DTC_Error_Update(flwDTC, time);
 	CAN_DTC_Error_Update(rrwDTC, time);
 	CAN_DTC_Error_Update(rlwDTC, time);
-  CAN_DTC_Error_Update(flsDTC, time);
-  CAN_DTC_Error_Update(frsDTC, time);
-  CAN_DTC_Error_Update(rlsDTC, time);
-  CAN_DTC_Error_Update(rrsDTC, time);
-  CAN_DTC_Error_Update(imuDTC, time);
-  CAN_DTC_Error_Update(brakeNthrottleDTC, time);
+	CAN_DTC_Error_Update(flsDTC, time);
+	CAN_DTC_Error_Update(frsDTC, time);
+	CAN_DTC_Error_Update(rlsDTC, time);
+	CAN_DTC_Error_Update(rrsDTC, time);
+	CAN_DTC_Error_Update(imuDTC, time);
+	CAN_DTC_Error_Update(brakeNthrottleDTC, time);
 
 	return;
 
@@ -734,18 +734,18 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, DTC_RRW, CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard));
 	  loggerEmplaceU16(logBuffer, DTC_RLW, CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard));
 	  loggerEmplaceU16(logBuffer, DTC_FBP, CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress));
-    loggerEmplaceU16(logBuffer, DTC_RBP, CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress));
-    loggerEmplaceU16(logBuffer, DTC_STP, CHECK_DTC(DTC_Error_State, DTC_Index_steer));
-    loggerEmplaceU16(logBuffer, DTC_FLS, CHECK_DTC(DTC_Error_State, DTC_Index_flShock));
-    loggerEmplaceU16(logBuffer, DTC_FRS, CHECK_DTC(DTC_Error_State, DTC_Index_frShock));
-    loggerEmplaceU16(logBuffer, DTC_RRS, CHECK_DTC(DTC_Error_State, DTC_Index_rrShock));
-    loggerEmplaceU16(logBuffer, DTC_RLS, CHECK_DTC(DTC_Error_State, DTC_Index_rlShock));
-    loggerEmplaceU16(logBuffer, DTC_FLSG, CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge));
-    loggerEmplaceU16(logBuffer, DTC_FRSG, CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge));
-    loggerEmplaceU16(logBuffer, DTC_RLSG, CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge));
-    loggerEmplaceU16(logBuffer, DTC_RRSG, CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge));
-    loggerEmplaceU16(logBuffer, DTC_IMU, CHECK_DTC(DTC_Error_State, DTC_Index_IMU));
-    loggerEmplaceU16(logBuffer, DTC_BNT, CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle));
+	  loggerEmplaceU16(logBuffer, DTC_RBP, CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress));
+	  loggerEmplaceU16(logBuffer, DTC_STP, CHECK_DTC(DTC_Error_State, DTC_Index_steer));
+	  loggerEmplaceU16(logBuffer, DTC_FLS, CHECK_DTC(DTC_Error_State, DTC_Index_flShock));
+	  loggerEmplaceU16(logBuffer, DTC_FRS, CHECK_DTC(DTC_Error_State, DTC_Index_frShock));
+	  loggerEmplaceU16(logBuffer, DTC_RRS, CHECK_DTC(DTC_Error_State, DTC_Index_rrShock));
+	  loggerEmplaceU16(logBuffer, DTC_RLS, CHECK_DTC(DTC_Error_State, DTC_Index_rlShock));
+	  loggerEmplaceU16(logBuffer, DTC_FLSG, CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_FRSG, CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_RLSG, CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_RRSG, CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_IMU, CHECK_DTC(DTC_Error_State, DTC_Index_IMU));
+	  loggerEmplaceU16(logBuffer, DTC_BNT, CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle));
 
 
 
