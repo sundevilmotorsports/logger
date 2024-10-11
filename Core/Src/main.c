@@ -127,7 +127,8 @@ enum LogChannel {
 	DTC_RRS, DTC_FLSG,
 	DTC_FRSG, DTC_RLSG,
 	DTC_RRSG, DTC_IMU,
-	DTC_BNT,
+	DTC_BNT, GPS_0,
+	GPS_1,
 	CH_COUNT
 };
 
@@ -658,6 +659,10 @@ int main(void)
 		  if(rlShock.error!=HAL_OK || rlShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_rlShock);
 		  if(rrShock.error!=HAL_OK || rrShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_rrShock);
 
+		  //Check GPS Fix type
+		  if(GNSS_Handle.fixType == 0) SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
+		  else if(GNSS_Handle.fixType == 1) SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+
 		  //Update Last Check Time
 		  DTC_PREV_CHECK_TIME = HAL_GetTick();
 	  }
@@ -746,6 +751,9 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, DTC_RRSG, CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge));
 	  loggerEmplaceU16(logBuffer, DTC_IMU, CHECK_DTC(DTC_Error_State, DTC_Index_IMU));
 	  loggerEmplaceU16(logBuffer, DTC_BNT, CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle));
+	  loggerEmplaceU16(logBuffer, GPS_0, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0));
+	  loggerEmplaceU16(logBuffer, GPS_1, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1));
+
 
 
 
@@ -830,23 +838,25 @@ int main(void)
 			  break;
       case 'd':
       //DTC Data Return over USB 1/2
-			  sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\r\n",
+			  sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
 					  logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
 
-            logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS]
+					  logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS],
+
+					  logBuffer[GPS_0], logBuffer[GPS_1]
 			  );
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
       case 'e':
       //DTC Data Return over USB 2/2
-        sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
-            logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
+    	  	  sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
+    	  			  logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
 
-            logBuffer[DTC_IMU], logBuffer[DTC_BNT], 
+					  logBuffer[DTC_IMU], logBuffer[DTC_BNT],
             
-            logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
-        );
-        CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+					  logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
+    	  	  );
+    	  	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
         break;
 		  case 'w':
 			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
