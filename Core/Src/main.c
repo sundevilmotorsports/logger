@@ -789,10 +789,10 @@ int main(void)
 		  TxHeader.MessageMarker = 0;
 
 		  // Convert GNSS_Handle.UniqueID to a byte array
-		  TxData[0] = (uint8_t)(GNSS_Handle.UniqueID >> 24);
-		  TxData[1] = (uint8_t)(GNSS_Handle.UniqueID >> 16);
-		  TxData[2] = (uint8_t)(GNSS_Handle.UniqueID >> 8);
-		  TxData[3] = (uint8_t)(GNSS_Handle.UniqueID);
+		  TxData[0] = GNSS_Handle.uniqueID[0];
+		  TxData[1] = GNSS_Handle.uniqueID[1];
+		  TxData[2] = GNSS_Handle.uniqueID[2];
+		  TxData[3] = GNSS_Handle.uniqueID[3];
 
 		  // Convert GNSS_Handle.lon to a byte array
 		  TxData[4] = (uint8_t)(GNSS_Handle.lon >> 24);
