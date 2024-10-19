@@ -400,7 +400,6 @@ ADC_Result rlShock;
 
 
 
-
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -779,14 +778,14 @@ int main(void)
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 
 		  TxHeader.Identifier = 0x369;
-		  TxHeader.IdType = FDCAN_STANDARD_ID;
-		  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-		  TxHeader.DataLength = FDCAN_DLC_BYTES_12; // Data length code for 8 bytes
-		  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-		  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-		  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
-		  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-		  TxHeader.MessageMarker = 0;
+//		  TxHeader.IdType = FDCAN_STANDARD_ID;
+//		  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+//		  TxHeader.DataLength = FDCAN_DLC_BYTES_12; // Data length code for 8 bytes
+//		  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+//		  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+//		  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+//		  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+//		  TxHeader.MessageMarker = 0;
 
 		  // Convert GNSS_Handle.UniqueID to a byte array
 		  TxData[0] = GNSS_Handle.uniqueID[0];
@@ -1161,7 +1160,7 @@ static void MX_FDCAN3_Init(void)
 
   TxHeader.IdType = FDCAN_STANDARD_ID;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.DataLength = FDCAN_DLC_BYTES_12;
   TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
   TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
   TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
