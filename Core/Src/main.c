@@ -734,25 +734,25 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
 	  //Report DTC Data
-	  loggerEmplaceU16(logBuffer, DTC_FLW, CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard));
-	  loggerEmplaceU16(logBuffer, DTC_FRW, CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard));
-	  loggerEmplaceU16(logBuffer, DTC_RRW, CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard));
-	  loggerEmplaceU16(logBuffer, DTC_RLW, CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard));
-	  loggerEmplaceU16(logBuffer, DTC_FBP, CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress));
-	  loggerEmplaceU16(logBuffer, DTC_RBP, CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress));
-	  loggerEmplaceU16(logBuffer, DTC_STP, CHECK_DTC(DTC_Error_State, DTC_Index_steer));
-	  loggerEmplaceU16(logBuffer, DTC_FLS, CHECK_DTC(DTC_Error_State, DTC_Index_flShock));
-	  loggerEmplaceU16(logBuffer, DTC_FRS, CHECK_DTC(DTC_Error_State, DTC_Index_frShock));
-	  loggerEmplaceU16(logBuffer, DTC_RRS, CHECK_DTC(DTC_Error_State, DTC_Index_rrShock));
-	  loggerEmplaceU16(logBuffer, DTC_RLS, CHECK_DTC(DTC_Error_State, DTC_Index_rlShock));
-	  loggerEmplaceU16(logBuffer, DTC_FLSG, CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge));
-	  loggerEmplaceU16(logBuffer, DTC_FRSG, CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge));
-	  loggerEmplaceU16(logBuffer, DTC_RLSG, CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge));
-	  loggerEmplaceU16(logBuffer, DTC_RRSG, CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge));
-	  loggerEmplaceU16(logBuffer, DTC_IMU, CHECK_DTC(DTC_Error_State, DTC_Index_IMU));
-	  loggerEmplaceU16(logBuffer, DTC_BNT, CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle));
-	  loggerEmplaceU16(logBuffer, GPS_0, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0));
-	  loggerEmplaceU16(logBuffer, GPS_1, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1));
+      logBuffer[DTC_FLW] = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard);
+      logBuffer[DTC_FRW] = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard);
+      logBuffer[DTC_RRW] = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard);
+      logBuffer[DTC_RLW] = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard);
+      logBuffer[DTC_FBP] = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress);
+      logBuffer[DTC_RBP] = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress);
+      logBuffer[DTC_STP] = CHECK_DTC(DTC_Error_State, DTC_Index_steer);
+      logBuffer[DTC_FLS] = CHECK_DTC(DTC_Error_State, DTC_Index_flShock);
+      logBuffer[DTC_FRS] = CHECK_DTC(DTC_Error_State, DTC_Index_frShock);
+      logBuffer[DTC_RRS] = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock);
+      logBuffer[DTC_RLS] = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock);
+      logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge);
+      logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge);
+      logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge);
+      logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge);
+      logBuffer[DTC_IMU] = CHECK_DTC(DTC_Error_State, DTC_Index_IMU);
+      logBuffer[DTC_BNT] = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle);
+      logBuffer[GPS_0] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0);
+      logBuffer[GPS_1] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1);
 
 
 
