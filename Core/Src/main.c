@@ -167,22 +167,18 @@ typedef struct {
 
 
 //DTC Codes
+// DTC Codes
 typedef struct {
-    uint32_t dtcCodes[1]; // Single 32-bit integer to store 25 bits
+    uint32_t dtcCodes; // Single 32-bit integer to store 25 bits relating to the DTC state of each device
 } dtc_code_handler;
 
 volatile dtc_code_handler DTC_Error_State_instance = {0};
 volatile dtc_code_handler* DTC_Error_State = &DTC_Error_State_instance;
 
 // DTC Bitwise Macros for Updating the Code Status
-#define SET_DTC(container, index)   ((container)->dtcCodes[(index) / 32] |= (1U << ((index) % 32)))
-#define CLEAR_DTC(container, index) ((container)->dtcCodes[(index) / 32] &= ~(1U << ((index) % 32)))
-#define CHECK_DTC(container, index) ((container)->dtcCodes[(index) / 32] & (1U << ((index) % 32)))
-
-// Function to return the DTC error state
-volatile uint32_t* DTC_Error_Check() {
-    return DTC_Error_State->dtcCodes;
-}
+#define SET_DTC(container, index)   ((container)->dtcCodes &= ~(1U << (index)))
+#define CLEAR_DTC(container, index) ((container)->dtcCodes |= (1U << (index)))
+#define CHECK_DTC(container, index) ((container)->dtcCodes & (1U << (index)))
 
 //Author of this awful struct: Alex Rumer, the first year (Who let him touch the Datalogger code? ¯\_(ツ)_/¯ )
 #pragma pack(push, 1) //Pushes storage boundary to single bit for best storage efficiency
@@ -191,7 +187,6 @@ typedef struct {
 	uint8_t errState:1; //Limits Storage to a single bit address
 	uint8_t DTC_Code_Index:5; //Limits Storage to 5 bit addresses maximizing the value at 32
 	//Corresponds to the 32 addresses in the DTC Code Handler
-
 	uint8_t measures; // Goal Number of Measurements to Calculate Average Response Time (MAX: 256)
 	uint8_t bufferIndex; //Actual Memory Allocation for number of Messages Received from CAN ID
 
@@ -734,25 +729,25 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
 	  //Report DTC Data
-      logBuffer[DTC_FLW] = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard);
-      logBuffer[DTC_FRW] = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard);
-      logBuffer[DTC_RRW] = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard);
-      logBuffer[DTC_RLW] = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard);
-      logBuffer[DTC_FBP] = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress);
-      logBuffer[DTC_RBP] = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress);
-      logBuffer[DTC_STP] = CHECK_DTC(DTC_Error_State, DTC_Index_steer);
-      logBuffer[DTC_FLS] = CHECK_DTC(DTC_Error_State, DTC_Index_flShock);
-      logBuffer[DTC_FRS] = CHECK_DTC(DTC_Error_State, DTC_Index_frShock);
-      logBuffer[DTC_RRS] = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock);
-      logBuffer[DTC_RLS] = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock);
-      logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge);
-      logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge);
-      logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge);
-      logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge);
-      logBuffer[DTC_IMU] = CHECK_DTC(DTC_Error_State, DTC_Index_IMU);
-      logBuffer[DTC_BNT] = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle);
-      logBuffer[GPS_0] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0);
-      logBuffer[GPS_1] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1);
+	  logBuffer[DTC_FLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress) ? 1 : 0;
+	  logBuffer[DTC_RBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress) ? 1 : 0;
+	  logBuffer[DTC_STP]  = CHECK_DTC(DTC_Error_State, DTC_Index_steer) ? 1 : 0;
+	  logBuffer[DTC_FLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_flShock) ? 1 : 0;
+	  logBuffer[DTC_FRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_frShock) ? 1 : 0;
+	  logBuffer[DTC_RRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock) ? 1 : 0;
+	  logBuffer[DTC_RLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock) ? 1 : 0;
+	  logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
+	  logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
+	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
+	  logBuffer[DTC_BNT]  = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle) ? 1 : 0;
+	  logBuffer[GPS_0]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
 
 
 
