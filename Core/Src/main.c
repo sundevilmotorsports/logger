@@ -370,16 +370,8 @@ void DTC_Error_All(uint32_t time){
 const uint32_t DTC_CHECK_INTERVAL = 20;
 uint32_t DTC_PREV_CHECK_TIME = 0;
 
-
-//CAN Read Pin Header
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
-
-//CAN Talk Pin Header
-FDCAN_TxHeaderTypeDef   TxHeader;
-uint8_t                 TxData[12];
-
-
 // volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
@@ -600,7 +592,8 @@ int main(void)
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
 
-
+  //Initialize DTC subsystem
+  DTC_Init(HAL_GetTick());
 
 
   GNSS_Init(&GNSS_Handle, &huart9);
@@ -609,9 +602,6 @@ int main(void)
   GNSS_ParseBuffer(&GNSS_Handle);
   //GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
-
-  //Initialize DTC subsystem
-  DTC_Init(HAL_GetTick());
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
@@ -744,25 +734,25 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
 	  //Report DTC Data
-      logBuffer[DTC_FLW] = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard);
-      logBuffer[DTC_FRW] = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard);
-      logBuffer[DTC_RRW] = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard);
-      logBuffer[DTC_RLW] = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard);
-      logBuffer[DTC_FBP] = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress);
-      logBuffer[DTC_RBP] = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress);
-      logBuffer[DTC_STP] = CHECK_DTC(DTC_Error_State, DTC_Index_steer);
-      logBuffer[DTC_FLS] = CHECK_DTC(DTC_Error_State, DTC_Index_flShock);
-      logBuffer[DTC_FRS] = CHECK_DTC(DTC_Error_State, DTC_Index_frShock);
-      logBuffer[DTC_RRS] = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock);
-      logBuffer[DTC_RLS] = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock);
-      logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge);
-      logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge);
-      logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge);
-      logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge);
-      logBuffer[DTC_IMU] = CHECK_DTC(DTC_Error_State, DTC_Index_IMU);
-      logBuffer[DTC_BNT] = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle);
-      logBuffer[GPS_0] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0);
-      logBuffer[GPS_1] = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1);
+	  loggerEmplaceU16(logBuffer, DTC_FLW, CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_FRW, CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_RRW, CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_RLW, CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard));
+	  loggerEmplaceU16(logBuffer, DTC_FBP, CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress));
+	  loggerEmplaceU16(logBuffer, DTC_RBP, CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress));
+	  loggerEmplaceU16(logBuffer, DTC_STP, CHECK_DTC(DTC_Error_State, DTC_Index_steer));
+	  loggerEmplaceU16(logBuffer, DTC_FLS, CHECK_DTC(DTC_Error_State, DTC_Index_flShock));
+	  loggerEmplaceU16(logBuffer, DTC_FRS, CHECK_DTC(DTC_Error_State, DTC_Index_frShock));
+	  loggerEmplaceU16(logBuffer, DTC_RRS, CHECK_DTC(DTC_Error_State, DTC_Index_rrShock));
+	  loggerEmplaceU16(logBuffer, DTC_RLS, CHECK_DTC(DTC_Error_State, DTC_Index_rlShock));
+	  loggerEmplaceU16(logBuffer, DTC_FLSG, CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_FRSG, CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_RLSG, CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_RRSG, CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge));
+	  loggerEmplaceU16(logBuffer, DTC_IMU, CHECK_DTC(DTC_Error_State, DTC_Index_IMU));
+	  loggerEmplaceU16(logBuffer, DTC_BNT, CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle));
+	  loggerEmplaceU16(logBuffer, GPS_0, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0));
+	  loggerEmplaceU16(logBuffer, GPS_1, CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1));
 
 
 
@@ -777,41 +767,6 @@ int main(void)
 		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
 		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
-
-		  TxHeader.Identifier = 0x369;
-		  TxHeader.IdType = FDCAN_STANDARD_ID;
-		  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-		  TxHeader.DataLength = FDCAN_DLC_BYTES_12; // Data length code for 8 bytes
-		  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-		  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-		  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
-		  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-		  TxHeader.MessageMarker = 0;
-
-		  // Convert GNSS_Handle.UniqueID to a byte array
-		  TxData[0] = (uint8_t)(GNSS_Handle.UniqueID >> 24);
-		  TxData[1] = (uint8_t)(GNSS_Handle.UniqueID >> 16);
-		  TxData[2] = (uint8_t)(GNSS_Handle.UniqueID >> 8);
-		  TxData[3] = (uint8_t)(GNSS_Handle.UniqueID);
-
-		  // Convert GNSS_Handle.lon to a byte array
-		  TxData[4] = (uint8_t)(GNSS_Handle.lon >> 24);
-		  TxData[5] = (uint8_t)(GNSS_Handle.lon >> 16);
-		  TxData[6] = (uint8_t)(GNSS_Handle.lon >> 8);
-		  TxData[7] = (uint8_t)(GNSS_Handle.lon);
-
-		  // Convert GNSS_Handle.lat to a byte array
-		  TxData[8] = (uint8_t)(GNSS_Handle.lat >> 24);
-		  TxData[9] = (uint8_t)(GNSS_Handle.lat >> 16);
-		  TxData[10] = (uint8_t)(GNSS_Handle.lat >> 8);
-		  TxData[11] = (uint8_t)(GNSS_Handle.lat);
-
-		  if(HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan3, &TxHeader, TxData) != HAL_OK)
-		  {
-				// HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-				Error_Handler();
-		  }
-
 		  GPS_Timer = HAL_GetTick();
 	  }
 
@@ -1158,15 +1113,6 @@ static void MX_FDCAN3_Init(void)
   canFilter.FilterID2 = 0x7FF;
   canFilter.RxBufferIndex = 0;
   HAL_FDCAN_ConfigFilter(&hfdcan3, &canFilter);
-
-  TxHeader.IdType = FDCAN_STANDARD_ID;
-  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
-  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
-  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
-  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
-  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
-  TxHeader.MessageMarker = 0;
 
   if (HAL_FDCAN_Start(&hfdcan3) != HAL_OK)
 	{
