@@ -75,6 +75,7 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
+//TODO: Add a Way to store last build date pushed to datalogger as a constant
 
 
 enum LogChannel {

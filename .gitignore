@@ -1,3 +1,8 @@
 .settings
 Debug
 Release
+.vscode/tasks.json
+.vscode/launch.json
+.vscode/extensions.json
+.vscode/CMakePresets.json
+.vscode/c_cpp_properties.json
