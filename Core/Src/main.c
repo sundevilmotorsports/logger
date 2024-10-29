@@ -32,6 +32,8 @@
 #include "ina260.h"
 #include "eeprom.h"
 #include "logger.h"
+#include "stdbool.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -165,6 +167,12 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
+float totalBytesReceived = 0;
+uint32_t lastDataRateTimestamp = 0;
+float dataRateMbits = 0.0000000;
+volatile uint8_t canDataBool = 0;
+
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -178,8 +186,20 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
+    totalBytesReceived += 8;
     canFifoFull = 0;
     count += 1;
+
+    if ((HAL_GetTick() - lastDataRateTimestamp >= 1000))//|| (HAL_GetTick() == 5000))
+    {
+        lastDataRateTimestamp = HAL_GetTick();
+
+        // Calculate data rate in Mbits/s if data was received
+        dataRateMbits = ((totalBytesReceived > 0) ? (totalBytesReceived * 8.0) / 1e6 : 0.0);
+        // Reset byte counter for the next period
+        totalBytesReceived = 0;
+    }
+
     if (count > 900000) {
     	count = 0;
     }
@@ -466,10 +486,11 @@ int main(void)
 			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
-		  case 'c':
-			  sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+		  case 'c':  // CAN diagnostics output
+		      sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\tCAN Data Rate: %.4f Mbits/s\r\n",
+		              count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0), dataRateMbits);
+	            CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+	            break;
 		  case 'a':
 			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
 					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
