@@ -6,3 +6,4 @@ Release
 .vscode/extensions.json
 .vscode/CMakePresets.json
 .vscode/c_cpp_properties.json
+/build
