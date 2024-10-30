@@ -3,8 +3,8 @@
 
 #include "adc.h"
 
-extern const uint32_t DTC_CHECK_INTERVAL = 20;
-extern uint32_t DTC_PREV_CHECK_TIME = 0;
+extern const uint32_t DTC_CHECK_INTERVAL;
+extern uint32_t DTC_PREV_CHECK_TIME;
 
 //Author of these awful structs: Alex Rumer, the first year (Who let him touch the Datalogger code? ¯\_(ツ)_/¯ )
 #pragma pack(push, 1) //Pushes storage boundary to single bit for best storage efficiency
@@ -108,14 +108,14 @@ extern can_dtc *imuDTC;
 extern can_dtc *brakeNthrottleDTC;
 
 //Brake Pressure DTC Handler
-extern adc_dtc *fBrakePress;
-extern adc_dtc *rBrakePress;
+extern adc_dtc *fBrakePress_DTC;
+extern adc_dtc *rBrakePress_DTC;
 
 //Shock DTC Handlers
-extern adc_dtc *flShock;
-extern adc_dtc *frShock;
-extern adc_dtc *rrShock;
-extern adc_dtc *rlShock;
+extern adc_dtc *flShock_DTC;
+extern adc_dtc *frShock_DTC;
+extern adc_dtc *rrShock_DTC;
+extern adc_dtc *rlShock_DTC;
 
 //CAN Device DTC Indexes
 extern const uint8_t DTC_Index_frWheelBoard;

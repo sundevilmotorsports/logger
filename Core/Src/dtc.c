@@ -1,4 +1,5 @@
 #include "dtc.h"
+#include <stdlib.h>
 
 const uint32_t DTC_CHECK_INTERVAL = 20;
 uint32_t DTC_PREV_CHECK_TIME = 0;
@@ -65,14 +66,14 @@ adc_dtc fBrakePress_instance, rBrakePress_instance, steer_instance,
 flShock_instance, frShock_instance, rrShock_instance, rlShock_instance;
 
 //Break Pressure DTC Handler
-adc_dtc *fBrakePress = &fBrakePress_instance;
-adc_dtc *rBrakePress = &rBrakePress_instance;
+adc_dtc *fBrakePress_DTC = &fBrakePress_instance;
+adc_dtc *rBrakePress_DTC = &rBrakePress_instance;
 
 //Shock DTC Handlers
-adc_dtc *flShock = &flShock_instance;
-adc_dtc *frShock = &frShock_instance;
-adc_dtc *rrShock = &rrShock_instance;
-adc_dtc *rlShock = &rlShock_instance;
+adc_dtc *flShock_DTC = &flShock_instance;
+adc_dtc *frShock_DTC = &frShock_instance;
+adc_dtc *rrShock_DTC = &rrShock_instance;
+adc_dtc *rlShock_DTC = &rlShock_instance;
 
 
 //*******************************************************************
@@ -236,14 +237,14 @@ void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
 
 	//Brake Pressure DTC Handlers
-	ADC_DTC_Init(fBrakePress, 10, DTC_Index_fBrakePress, 100, 1000);
-	ADC_DTC_Init(rBrakePress, 10, DTC_Index_rBrakePress, 100, 1000);
+	ADC_DTC_Init(fBrakePress_DTC, 10, DTC_Index_fBrakePress, 100, 1000);
+	ADC_DTC_Init(rBrakePress_DTC, 10, DTC_Index_rBrakePress, 100, 1000);
 
 	//Shock DTC Handlers
-	ADC_DTC_Init(flShock, 10, DTC_Index_flShock, 100, 1000);
-	ADC_DTC_Init(frShock, 10, DTC_Index_frShock, 100, 1000);
-	ADC_DTC_Init(rrShock, 10, DTC_Index_rrShock, 100, 1000);
-	ADC_DTC_Init(rlShock, 10, DTC_Index_rlShock, 100, 1000);
+	ADC_DTC_Init(flShock_DTC, 10, DTC_Index_flShock, 100, 1000);
+	ADC_DTC_Init(frShock_DTC, 10, DTC_Index_frShock, 100, 1000);
+	ADC_DTC_Init(rrShock_DTC, 10, DTC_Index_rrShock, 100, 1000);
+	ADC_DTC_Init(rlShock_DTC, 10, DTC_Index_rlShock, 100, 1000);
 
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
@@ -263,12 +264,12 @@ void DTC_Error_All(uint32_t time){
 	CAN_DTC_Error_Update(brakeNthrottleDTC, time);
 	
 	//ADC DTC
-	ADC_DTC_Error_Update(fBrakePress, time);
-	ADC_DTC_Error_Update(rBrakePress, time);
-	ADC_DTC_Error_Update(flShock, time);
-	ADC_DTC_Error_Update(frShock, time);
-	ADC_DTC_Error_Update(rrShock, time);
-	ADC_DTC_Error_Update(rlShock, time);
+	ADC_DTC_Error_Update(fBrakePress_DTC, time);
+	ADC_DTC_Error_Update(rBrakePress_DTC, time);
+	ADC_DTC_Error_Update(flShock_DTC, time);
+	ADC_DTC_Error_Update(frShock_DTC, time);
+	ADC_DTC_Error_Update(rrShock_DTC, time);
+	ADC_DTC_Error_Update(rlShock_DTC, time);
 
 	return;
 }
