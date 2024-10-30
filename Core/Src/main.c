@@ -32,6 +32,7 @@
 #include "ina260.h"
 #include "eeprom.h"
 #include "logger.h"
+#include "dtc.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -75,7 +76,8 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
-//TODO: Add a Way to store last build date pushed to datalogger as a constant
+//Stores the Date and Time of the Latest Compile (21 Bytes)
+const char compileDateTime[] = __DATE__ " " __TIME__;
 
 
 enum LogChannel {
@@ -130,6 +132,8 @@ enum LogChannel {
 	DTC_RRSG, DTC_IMU,
 	DTC_BNT, GPS_0,
 	GPS_1,
+  BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
+  BUILDT_11, BUILDT_12, BUILDT_13, BUILDT_14, BUILDT_15, BUILDT_16, BUILDT_17, BUILDT_18, BUILDT_19, BUILDT_20,
 	CH_COUNT
 };
 
@@ -166,205 +170,6 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
-
-//DTC Codes
-// DTC Codes
-typedef struct {
-    uint32_t dtcCodes; // Single 32-bit integer to store 25 bits relating to the DTC state of each device
-} dtc_code_handler;
-
-volatile dtc_code_handler DTC_Error_State_instance = {0};
-volatile dtc_code_handler* DTC_Error_State = &DTC_Error_State_instance;
-
-// DTC Bitwise Macros for Updating the Code Status
-#define SET_DTC(container, index)   ((container)->dtcCodes &= ~(1U << (index)))
-#define CLEAR_DTC(container, index) ((container)->dtcCodes |= (1U << (index)))
-#define CHECK_DTC(container, index) ((container)->dtcCodes & (1U << (index)))
-
-//Author of this awful struct: Alex Rumer, the first year (Who let him touch the Datalogger code? ¯\_(ツ)_/¯ )
-#pragma pack(push, 1) //Pushes storage boundary to single bit for best storage efficiency
-typedef struct {
-	uint8_t init:1; //Limits Storage to a single bit address
-	uint8_t errState:1; //Limits Storage to a single bit address
-	uint8_t DTC_Code_Index:5; //Limits Storage to 5 bit addresses maximizing the value at 32
-	//Corresponds to the 32 addresses in the DTC Code Handler
-	uint8_t measures; // Goal Number of Measurements to Calculate Average Response Time (MAX: 256)
-	uint8_t bufferIndex; //Actual Memory Allocation for number of Messages Received from CAN ID
-
-	uint32_t totalTime; //Time (ms) from Last Average Response Time Calculation
-	//This data can be received from the CAN_RDTxR register (I copied the data type hehe)
-	uint32_t prevTime;
-
-	uint32_t avgResponse; //Store the calculated average response time
-	uint8_t percentOver; //Store the percentage of avg response time over allowed before throwing an error
-	uint32_t *timeBuffer;
-
-
-}can_dtc; //This name needs work I know...
-#pragma pack(pop) // Restores default STM32 Byte Padding
-
-//Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
-void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time){
-	data->init = 0;
-	data->bufferIndex = 0;
-	data->errState = 0;
-	data->measures = measures;
-	data->totalTime = start_time;
-	data->prevTime = start_time;
-	data->percentOver = percentage_over_allowed;
-	data->DTC_Code_Index = index&0x1F; //Bitwise Operation Ensures Index never exceeds 32 and limits Memory Useage
-
-	//Circular Buffer to Ensure a Rolling Average
-	data->timeBuffer = (uint32_t *)malloc(measures * sizeof(uint32_t));
-    for (int i = 0; i < measures; i++) {
-        data->timeBuffer[i] = 0;
-    }
-	return;
-}
-
-//Update the measurement state of the CAN DTC handler
-void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
-    uint32_t interval = msgTime - data->prevTime;
-    data->prevTime = msgTime;
-
-    // Update the total time by subtracting the oldest value and adding the new interval
-    data->totalTime = data->totalTime - data->timeBuffer[data->bufferIndex] + interval;
-
-    // Store the new interval in the buffer
-    data->timeBuffer[data->bufferIndex] = interval;
-
-    // Update the buffer index
-    data->bufferIndex = (data->bufferIndex + 1) % data->measures;
-	return;
-}
-
-//Update the Average Response Measurement of the CAN DTC handler
-void CAN_DTC_Response_Update(can_dtc *data){
-	//Error and Value Checking
-	if(data->init && !data->errState){
-		//Calculate Average Response Time
-		data->avgResponse = data->totalTime/data->measures;
-	}
-	return;
-}
-
-//Check if the CAN device has not responded lately, if not send an Error code to the DTC
-void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
-	uint32_t currentTime = time - data->prevTime;
-	CAN_DTC_Response_Update(data);
-
-	if(currentTime > data->avgResponse * (1 + data->percentOver/100)){
-		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
-	}
-	return;
-}
-
-//Simplified checking logic for switch case checks
-void CAN_DTC_Update_All(can_dtc *data, uint32_t time) {
-    if (data->init) {
-        CAN_DTC_State_Update(data, time);
-        if (data->bufferIndex == 0) { // Update the average when the buffer is full
-            CAN_DTC_Response_Update(data);
-        }
-    } else {
-        CAN_DTC_State_Update(data, time);
-        data->avgResponse = data->totalTime; // Calculate initial average after first message
-        data->init = 1; // Set the init flag
-    }
-}
-
-//Initialize Wheel Board DTC handlers and allocate memory
-can_dtc frwDTC_instance, flwDTC_instance, rrwDTC_instance, rlwDTC_instance, flsDTC_instance, frsDTC_instance, rlsDTC_instance, rrsDTC_instance, imuDTC_instance, brakeNthrottleDTC_instance;
-
-//Wheel Board DTC Handlers
-can_dtc *frwDTC = &frwDTC_instance;
-can_dtc *flwDTC = &flwDTC_instance;
-can_dtc *rrwDTC = &rrwDTC_instance;
-can_dtc *rlwDTC = &rlwDTC_instance;
-
-//String Gauge DTC Handlers
-can_dtc *flsDTC = &flsDTC_instance;
-can_dtc *frsDTC = &frsDTC_instance;
-can_dtc *rlsDTC = &rlsDTC_instance;
-can_dtc *rrsDTC = &rrsDTC_instance;
-
-//IMU DTC Handler
-can_dtc *imuDTC = &imuDTC_instance;
-
-//Brake and Throttle DTC Handler
-can_dtc *brakeNthrottleDTC = &brakeNthrottleDTC_instance;
-
-
-//******************************************************************* 
-//Defining the DTC Storage Index for each recorded DTC device
-
-//CAN Device DTC Indexes
-uint8_t DTC_Index_frWheelBoard = 0;
-uint8_t DTC_Index_flWheelBoard = 1;
-uint8_t DTC_Index_rrWheelBoard = 2;
-uint8_t DTC_Index_rlWheelBoard = 3;
-uint8_t DTC_Index_flStringGauge = 11;
-uint8_t DTC_Index_frStringGauge = 12;
-uint8_t DTC_Index_rlStringGauge = 13;
-uint8_t DTC_Index_rrStringGauge = 14;
-uint8_t DTC_Index_IMU = 15;
-uint8_t DTC_Index_brakeNthrottle = 16;
-
-//GPS Device DTC Indexes
-uint8_t DTC_Index_GPS_0 = 17;
-uint8_t DTC_Index_GPS_1 = 18;
-
-//ADC Device DTC Indexes
-uint8_t DTC_Index_fBrakePress = 4;
-uint8_t DTC_Index_rBrakePress = 5;
-uint8_t DTC_Index_steer = 6;
-uint8_t DTC_Index_flShock = 7;
-uint8_t DTC_Index_frShock = 8;
-uint8_t DTC_Index_rlShock = 9;
-uint8_t DTC_Index_rrShock = 10;
-//*******************************************************************
-
-//Initialize all DTC handlers (Those that require initialization)
-void DTC_Init(uint32_t start_time){
-  //Wheel Board DTC Handlers
-	CAN_DTC_Init(frwDTC, DTC_Index_frWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(flwDTC, DTC_Index_flWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 10, 25, start_time);
-
-  //String Gauge DTC Handlers
-	CAN_DTC_Init(flsDTC, DTC_Index_flStringGauge, 10, 25, start_time);
-	CAN_DTC_Init(frsDTC, DTC_Index_frStringGauge, 10, 25, start_time);
-	CAN_DTC_Init(rlsDTC, DTC_Index_rlStringGauge, 10, 25, start_time);
-	CAN_DTC_Init(rrsDTC, DTC_Index_rrStringGauge, 10, 25, start_time);
-
-	//IMU DTC Handler
-	CAN_DTC_Init(imuDTC, DTC_Index_IMU, 10, 25, start_time);
-
-	//Brake and Throttle DTC Handler
-	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
-
-	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
-	return;
-}
-void DTC_Error_All(uint32_t time){
-	CAN_DTC_Error_Update(frwDTC, time);
-	CAN_DTC_Error_Update(flwDTC, time);
-	CAN_DTC_Error_Update(rrwDTC, time);
-	CAN_DTC_Error_Update(rlwDTC, time);
-	CAN_DTC_Error_Update(flsDTC, time);
-	CAN_DTC_Error_Update(frsDTC, time);
-	CAN_DTC_Error_Update(rlsDTC, time);
-	CAN_DTC_Error_Update(rrsDTC, time);
-	CAN_DTC_Error_Update(imuDTC, time);
-	CAN_DTC_Error_Update(brakeNthrottleDTC, time);
-
-	return;
-
-}
-
-const uint32_t DTC_CHECK_INTERVAL = 20;
-uint32_t DTC_PREV_CHECK_TIME = 0;
 
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
@@ -619,6 +424,12 @@ int main(void)
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
+  //Write the Date and Time of the Last Build to the logBuffer
+  //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
+  for(int i=0; i<21; i++){
+    logBuffer[BUILDT+i] = compileDateTime[i];
+  }
+
 
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
@@ -643,17 +454,11 @@ int main(void)
   {
 	  //Check the Error State of all the DTC devices at 50 Hz
 	  if(HAL_GetTick() - DTC_PREV_CHECK_TIME >= DTC_CHECK_INTERVAL ){
-		  //Check CAN Device Response
+		  //Check CAN and ADC Device Response
 		  DTC_Error_All(HAL_GetTick());
 
-		  //Check Analog Device Response
-		  if(fBrakePress.error!=HAL_OK || fBrakePress.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_fBrakePress);
-		  if(rBrakePress.error!=HAL_OK || rBrakePress.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_rBrakePress);
+      //Check Steering Position Sensor
 		  if(steer.error!=HAL_OK || steer.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_steer);
-		  if(flShock.error!=HAL_OK || flShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_flShock);
-		  if(frShock.error!=HAL_OK || frShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_frShock);
-		  if(rlShock.error!=HAL_OK || rlShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_rlShock);
-		  if(rrShock.error!=HAL_OK || rrShock.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_rrShock);
 
 		  //Check GPS Fix type
 		  if(GNSS_Handle.fixType == 0) SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
