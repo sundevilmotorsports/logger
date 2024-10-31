@@ -176,6 +176,9 @@ typedef struct {
 
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
+//TX TEST CONFIG
+FDCAN_TxHeaderTypeDef   TxHeader;
+uint8_t               TxData[8];
 // volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
@@ -442,15 +445,11 @@ int main(void)
 	  Error_Handler();
   }
 
-  //TX TEST CONFIG
-  FDCAN_TxHeaderTypeDef   TxHeader;
-  uint8_t               TxData[8];
+
   // uint32_t              TxMailbox;
-  for (int i = 0; i < 8; i++) {
-      TxData[i] = 0x61;
-  }
+
   TxHeader.IdType = FDCAN_STANDARD_ID;
-  TxHeader.Identifier = 0x446;
+  // TxHeader.Identifier = 0x446;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
   TxHeader.DataLength = FDCAN_DLC_BYTES_8;
 
@@ -467,8 +466,14 @@ int main(void)
 		  if(steer.error!=HAL_OK || steer.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_steer);
 
 		  //Check GPS Fix type
-		  if(GNSS_Handle.fixType == 0) SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
-		  else if(GNSS_Handle.fixType == 1) SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+		  if(GNSS_Handle.fixType == 0){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+      } 
+		  else if(GNSS_Handle.fixType == 1){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
+      } 
 
 		  //Update Last Check Time
 		  DTC_PREV_CHECK_TIME = HAL_GetTick();
@@ -575,14 +580,34 @@ int main(void)
 		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
+
+      // 		  // Convert GNSS_Handle.lon to a byte array
+		  // TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
+		  // TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
+		  // TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
+		  // TxData[3] = (uint8_t)(GNSS_Handle.lon);
+
+		  // // Convert GNSS_Handle.lat to a byte array
+		  // TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
+		  // TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
+		  // TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
+		  // TxData[7] = (uint8_t)(GNSS_Handle.lat);
+
+      // TxHeader.Identifier = 0x369;
+
+    //   if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
+
+
 	  }
 
 	  // BEGIN TX TEST CODE
 	  static uint32_t YapTimer = 0;
 	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
 		  YapTimer = HAL_GetTick();
-
-
+      TxHeader.Identifier = 0x2ee;
+      for (int i = 0; i < 8; i++) {
+        TxData[i] = 0x61;
+      }
 
 		  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
 	  }
@@ -716,6 +741,9 @@ int main(void)
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
+      case 'z':
+          sprintf(msg, "Tx ID: %x\tTx Data: %d %d %d %d %d %d %d %d\r\n", TxHeader.Identifier, TxData[0], TxData[1], TxData[2], TxData[3], TxData[4], TxData[5], TxData[6], TxData[7]);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));

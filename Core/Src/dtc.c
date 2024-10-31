@@ -63,7 +63,7 @@ can_dtc *brakeNthrottleDTC = &brakeNthrottleDTC_instance;
 
 //Create ADC Handlers
 adc_dtc fBrakePress_instance, rBrakePress_instance, steer_instance, 
-flShock_instance, frShock_instance, rrShock_instance, rlShock_instance;
+flShock_instance, frShock_instance, rrShock_instance, rlShock_instance, stp_instance;
 
 //Break Pressure DTC Handler
 adc_dtc *fBrakePress_DTC = &fBrakePress_instance;
@@ -74,7 +74,7 @@ adc_dtc *flShock_DTC = &flShock_instance;
 adc_dtc *frShock_DTC = &frShock_instance;
 adc_dtc *rrShock_DTC = &rrShock_instance;
 adc_dtc *rlShock_DTC = &rlShock_instance;
-
+adc_dtc *stp_DTC = &stp_instance;
 
 //*******************************************************************
 
@@ -246,6 +246,10 @@ void DTC_Init(uint32_t start_time){
 	ADC_DTC_Init(rrShock_DTC, 10, DTC_Index_rrShock, 10, 1000);
 	ADC_DTC_Init(rlShock_DTC, 10, DTC_Index_rlShock, 10, 1000);
 
+	ADC_DTC_Init(stp_DTC, 10, DTC_Index_steer, 10, 30000);
+
+
+
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
 }
@@ -270,6 +274,7 @@ void DTC_Error_All(uint32_t time){
 	ADC_DTC_Error_Update(frShock_DTC, time);
 	ADC_DTC_Error_Update(rrShock_DTC, time);
 	ADC_DTC_Error_Update(rlShock_DTC, time);
+	ADC_DTC_Error_Update(stp_DTC, time);
 
 	return;
 }
