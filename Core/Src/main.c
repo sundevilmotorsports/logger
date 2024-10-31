@@ -179,7 +179,7 @@ uint8_t               	RxData[8];
 //TX TEST CONFIG
 FDCAN_TxHeaderTypeDef   TxHeader;
 uint8_t               TxData[8];
-// volatile uint32_t count = 0;
+volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 volatile uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
@@ -206,10 +206,10 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     // do things with data
     // totalBytesReceived += 8;
     canFifoFull = 0;
-    // count += 1;
-    // if (count > 900000) {
-    // 	count = 0;
-    // }
+    count += 1;
+    if (count > 900000) {
+    	count = 0;
+    }
     switch(RxHeader.Identifier) {
     case 0x35F:
     	drs = RxData[0];
@@ -677,7 +677,7 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'c':
-          sprintf("fifo full: %d\tfifo level: %ld\r\n", canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+          sprintf(msg, "messages: %d\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'd':
