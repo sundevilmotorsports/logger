@@ -443,7 +443,7 @@ int main(void)
   //TX TEST CONFIG
   FDCAN_TxHeaderTypeDef   TxHeader;
   uint8_t               TxData[8];
-  uint32_t              TxMailbox;
+  // uint32_t              TxMailbox;
   for (int i = 0; i < 8; i++) {
       TxData[i] = 0x61;
   }
