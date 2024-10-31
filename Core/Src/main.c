@@ -133,8 +133,10 @@ enum LogChannel {
 	DTC_RRSG, DTC_IMU,
 	DTC_BNT, GPS_0,
 	GPS_1,
-  BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
-  BUILDT_11, BUILDT_12, BUILDT_13, BUILDT_14, BUILDT_15, BUILDT_16, BUILDT_17, BUILDT_18, BUILDT_19, BUILDT_20,
+
+  //Removed reporting Latest Build Time in Log Buffer, Reports Directly to USB Debug
+  // BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
+  // BUILDT_11, BUILDT_12, BUILDT_13, BUILDT_14, BUILDT_15, BUILDT_16, BUILDT_17, BUILDT_18, BUILDT_19, BUILDT_20,
 	CH_COUNT
 };
 
@@ -418,9 +420,9 @@ int main(void)
 
   //Write the Date and Time of the Last Build to the logBuffer
   //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
-  for(int i=0; i<21; i++){
-    logBuffer[BUILDT+i] = compileDateTime[i];
-  }
+  // for(int i=0; i<21; i++){
+  //   logBuffer[BUILDT+i] = compileDateTime[i];
+  // }
 
 
 
@@ -598,6 +600,8 @@ int main(void)
 	  if(HAL_GetTick() - usbTimeout > 250) {
 		  usbTimeout = HAL_GetTick();
 		  adcEnable();
+
+      //THESE CASES ARE IN ALPHABETICAL ORDER, PLEASE DO NOT MESS THIS UP - ALEX
 		  switch(usbBuffer[0]) {
 		  case '0':
 			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0).value);
@@ -631,86 +635,87 @@ int main(void)
 			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
-		  case 's':
-			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'i':
-			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'c':
-			  sprintf("fifo full: %d\tfifo level: %ld\r\n", canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
 		  case 'a':
-			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
-					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
-					  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
-					  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
-					  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
-					  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
-					  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
-					  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
-			  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+          sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
+                  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
+                  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
+                  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
+                  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
+                  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
+                  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
+                  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'b':
+          sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'c':
+          sprintf("fifo full: %d\tfifo level: %ld\r\n", canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
       case 'd':
-      //DTC Data Return over USB 1/2
-			  sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
-					  logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
-
-					  logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS],
-
-					  logBuffer[GPS_0], logBuffer[GPS_1]
-			  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+          //DTC Data Return over USB 1/2
+          sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
+                  logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
+                  logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS],
+                  logBuffer[GPS_0], logBuffer[GPS_1]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
       case 'e':
-      //DTC Data Return over USB 2/2
-    	  	  sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
-    	  			  logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
-
-					  logBuffer[DTC_IMU], logBuffer[DTC_BNT],
-            
-					  logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
-    	  	  );
-    	  	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-        break;
-		  case 'w':
-			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
-					  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
-					  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
-					  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
-					  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
-					  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  case 'm':
-			  sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'p':
-			  sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 't':
-			  testNo++;
-			  sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  usbBuffer[0] = 'm';
-			  break;
-		  case 'g':
-			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
-				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
-				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-				  GNSS_Handle.lon, GNSS_Handle.lat
-				  );
-		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'b':
-			  sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+          //DTC Data Return over USB 2/2
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
+                  logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
+                  logBuffer[DTC_IMU], logBuffer[DTC_BNT],
+                  logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'g':
+          sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
+                  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+                  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+                  GNSS_Handle.lon, GNSS_Handle.lat
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'i':
+          sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'm':
+          sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'o':
+          sprintf(msg, "Last Build: %s\r\n", compileDateTime);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'p':
+          sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 's':
+          sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 't':
+          testNo++;
+          sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          usbBuffer[0] = 'm';
+          break;
+      case 'w':
+          sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
+                  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
+                  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
+                  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
+                  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
