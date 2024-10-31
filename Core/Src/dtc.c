@@ -237,14 +237,14 @@ void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
 
 	//Brake Pressure DTC Handlers
-	ADC_DTC_Init(fBrakePress_DTC, 10, DTC_Index_fBrakePress, 100, 1000);
-	ADC_DTC_Init(rBrakePress_DTC, 10, DTC_Index_rBrakePress, 100, 1000);
+	ADC_DTC_Init(fBrakePress_DTC, 10, DTC_Index_fBrakePress, 10, 1000);
+	ADC_DTC_Init(rBrakePress_DTC, 10, DTC_Index_rBrakePress, 10, 1000);
 
 	//Shock DTC Handlers
-	ADC_DTC_Init(flShock_DTC, 10, DTC_Index_flShock, 100, 1000);
-	ADC_DTC_Init(frShock_DTC, 10, DTC_Index_frShock, 100, 1000);
-	ADC_DTC_Init(rrShock_DTC, 10, DTC_Index_rrShock, 100, 1000);
-	ADC_DTC_Init(rlShock_DTC, 10, DTC_Index_rlShock, 100, 1000);
+	ADC_DTC_Init(flShock_DTC, 10, DTC_Index_flShock, 10, 1000);
+	ADC_DTC_Init(frShock_DTC, 10, DTC_Index_frShock, 10, 1000);
+	ADC_DTC_Init(rrShock_DTC, 10, DTC_Index_rrShock, 10, 1000);
+	ADC_DTC_Init(rlShock_DTC, 10, DTC_Index_rlShock, 10, 1000);
 
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
