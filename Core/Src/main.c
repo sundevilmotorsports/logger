@@ -376,7 +376,19 @@ int main(void)
 	  Error_Handler();
   }
 
+  //TX TEST CONFIG
+  FDCAN_TxHeaderTypeDef   TxHeader;
+  uint8_t               TxData[8];
+  uint32_t              TxMailbox;
+  for (int i = 0; i < 8; i++) {
+      TxData[i] = 0x61;
+  }
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+  TxHeader.Identifier = 0x446;
+  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
 
+  //END TX TEST CONFIG
 
   while (1)
   {
@@ -437,6 +449,22 @@ int main(void)
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
 	  }
+
+	  // BEGIN TX TEST CODE
+	  static uint32_t YapTimer = 0;
+	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
+		  YapTimer = HAL_GetTick();
+
+
+
+		  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
+	  }
+
+
+
+
+
+	  // END TX TEST CODE
 
 	  logBuffer[DRS] = drs;
 	  logBuffer[TESTNO] = testNo;
