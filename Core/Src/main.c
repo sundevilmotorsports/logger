@@ -32,6 +32,8 @@
 #include "ina260.h"
 #include "eeprom.h"
 #include "logger.h"
+#include "dtc.h"
+#include "stdbool.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -181,6 +183,9 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
+
+ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
+
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
   if((RxFifo0ITs & FDCAN_IT_RX_FIFO0_NEW_MESSAGE) != RESET)
@@ -194,12 +199,12 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
-    totalBytesReceived += 8;
+    // totalBytesReceived += 8;
     canFifoFull = 0;
-    count += 1;
-    if (count > 900000) {
-    	count = 0;
-    }
+    // count += 1;
+    // if (count > 900000) {
+    // 	count = 0;
+    // }
     switch(RxHeader.Identifier) {
     case 0x35F:
     	drs = RxData[0];
@@ -607,7 +612,7 @@ int main(void)
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'c':
-			  sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+			  sprintf("fifo full: %d\tfifo level: %ld\r\n", canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case 'a':
