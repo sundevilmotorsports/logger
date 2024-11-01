@@ -449,9 +449,14 @@ int main(void)
   // uint32_t              TxMailbox;
 
   TxHeader.IdType = FDCAN_STANDARD_ID;
-  // TxHeader.Identifier = 0x446;
+  TxHeader.Identifier = 0x2ee;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
   TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  TxHeader.MessageMarker = 0;
 
   //END TX TEST CONFIG
 
@@ -604,13 +609,37 @@ int main(void)
 	  static uint32_t YapTimer = 0;
 	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
 		  YapTimer = HAL_GetTick();
-      TxHeader.Identifier = 0x2ee;
+      /*
       for (int i = 0; i < 8; i++) {
         TxData[i] = 0x61;
       }
+ */
+      uint8_t TxData[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
+      if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK)
+      {
+          uint32_t errorCode = HAL_FDCAN_GetError(&hfdcan2);
+          switch (errorCode) {
+              case HAL_FDCAN_ERROR_PARAM:
+                  sprintf(msg, "hey, my error code is: ERROR PARAM (0x20)\r\n");
+                  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                  break;
+              case FDCAN_IR_EP:
+                  sprintf(msg, "hey, my error code is: ERROR PASSIVE (0x10)\r\n");
+                  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                  break;
+              case FDCAN_IR_BO:
+                  sprintf(msg, "hey, my error code is: BUS OFF (0x40)\r\n");
+                  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                  break;
+              default:
+                  sprintf(msg, "hey, my error code is: %lu\r\n", errorCode);
+                  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));// Fallback to numeric
+                  break;// Use %lu for uint32_t
 
-		  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
-	  }
+          }
+              // Optional: handle other errors differently or log them
+          }
+      }
 
 
 
@@ -901,7 +930,28 @@ static void MX_FDCAN2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN2_Init 2 */
+  HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan2, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_OVERWRITE);
+  canFilter.IdType = FDCAN_STANDARD_ID;
+  canFilter.FilterIndex = 0;
+  canFilter.FilterType = FDCAN_FILTER_RANGE;
+  canFilter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  // accept all IDs
+  canFilter.FilterID1 = 0x00;
+  canFilter.FilterID2 = 0x7FF;
+  canFilter.RxBufferIndex = 0;
+  HAL_FDCAN_ConfigFilter(&hfdcan2, &canFilter);
 
+  if (HAL_FDCAN_Start(&hfdcan2) != HAL_OK)
+	{
+	  Error_Handler();
+	}
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+    /* Notification Error */
+    Error_Handler();
+  }
+  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN2_Init 2 */
 
 }
@@ -1269,6 +1319,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
+{
+    char msg[50];
+    uint32_t errorCode = HAL_FDCAN_GetError(hfdcan);
+    sprintf(msg, "Error Code: 0x%lx\r\n", errorCode);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+}
+
 
 /* USER CODE END 4 */
 
