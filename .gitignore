@@ -7,3 +7,4 @@ Release
 .vscode/CMakePresets.json
 .vscode/c_cpp_properties.json
 /build
+/.vscode
