@@ -446,14 +446,6 @@ int main(void)
   }
 
 
-  // uint32_t              TxMailbox;
-
-  TxHeader.IdType = FDCAN_STANDARD_ID;
-  // TxHeader.Identifier = 0x446;
-  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
-
-  //END TX TEST CONFIG
 
   while (1)
   {
@@ -599,24 +591,6 @@ int main(void)
 
 
 	  }
-
-	  // BEGIN TX TEST CODE
-	  static uint32_t YapTimer = 0;
-	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
-		  YapTimer = HAL_GetTick();
-      TxHeader.Identifier = 0x2ee;
-      for (int i = 0; i < 8; i++) {
-        TxData[i] = 0x61;
-      }
-
-		  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
-	  }
-
-
-
-
-
-	  // END TX TEST CODE
 
 	  logBuffer[DRS] = drs;
 	  logBuffer[TESTNO] = testNo;
