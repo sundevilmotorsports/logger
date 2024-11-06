@@ -446,10 +446,6 @@ int main(void)
   }
 
 
-  // uint32_t              TxMailbox;
-
-
-  //END TX TEST CONFIG
 
   while (1)
   {
