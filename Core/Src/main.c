@@ -175,8 +175,8 @@ typedef struct {
 
 
 FDCAN_RxHeaderTypeDef	RxHeader;
-uint8_t               	RxData[8];
-
+uint8_t               RxData[8];
+uint8_t               TxData[8];
 volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
@@ -571,22 +571,19 @@ int main(void)
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
 
-      // 		  // Convert GNSS_Handle.lon to a byte array
-		  // TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
-		  // TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
-		  // TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
-		  // TxData[3] = (uint8_t)(GNSS_Handle.lon);
+      // Convert GNSS_Handle.lon to a byte array
+		  TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
+		  TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
+		  TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
+		  TxData[3] = (uint8_t)(GNSS_Handle.lon);
 
-		  // // Convert GNSS_Handle.lat to a byte array
-		  // TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
-		  // TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
-		  // TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
-		  // TxData[7] = (uint8_t)(GNSS_Handle.lat);
+		  // Convert GNSS_Handle.lat to a byte array
+		  TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
+		  TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
+		  TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
+		  TxData[7] = (uint8_t)(GNSS_Handle.lat);
 
-      // TxHeader.Identifier = 0x369;
-
-    //   if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
-
+      CAN2_Send_Tx(0x369, TxData, 8);
 
 	  }
 
@@ -599,9 +596,14 @@ int main(void)
         TxData[i] = 0x61;
       }
  */
-      uint8_t TxData[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
-      CAN2_Send_Tx(TxData);
-      CAN3_Send_Tx(TxData);
+      TxData[0] = 0x01;
+      TxData[1] = 0x02;
+      TxData[2] = 0x03;
+      TxData[3] = 0x04;
+      for(int i=4; i<8; i++) TxData[i] = 0x00;
+  
+      CAN2_Send_Tx(0x2ee, TxData, 4);
+      CAN3_Send_Tx(0x2ee, TxData, 4);
 
       }
 
@@ -922,17 +924,22 @@ static void MX_FDCAN2_Init(void)
 
 }
 
-void CAN2_Send_Tx(uint8_t TxData[8]){
+void CAN2_Send_Tx(int id, uint8_t TxData[8], uint8_t length){
   //TX TEST CONFIG
   FDCAN_TxHeaderTypeDef   TxHeader;
 
   char msg[128];
+  if(length > 8){
+    sprintf(msg, "WHOAH! Wayy too much data, you tried to send: %d bytes", length);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+    return;
+  }
 
   /* Prepare Tx Header */
-  TxHeader.Identifier = 0x2ee;
+  TxHeader.Identifier = id;
   TxHeader.IdType = FDCAN_STANDARD_ID;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.DataLength = (uint32_t)length << 16;
   TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
   TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
   TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
@@ -1043,17 +1050,22 @@ static void MX_FDCAN3_Init(void)
 
 }
 
-void CAN3_Send_Tx(uint8_t TxData[8]){
+void CAN3_Send_Tx(int id, uint8_t TxData[8], uint8_t length){
   //TX TEST CONFIG
   FDCAN_TxHeaderTypeDef   TxHeader;
 
   char msg[128];
+  if(length > 8){
+    sprintf(msg, "WHOAH! Wayy too much data, you tried to send: %d bytes", length);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+    return;
+  }
 
   /* Prepare Tx Header */
-  TxHeader.Identifier = 0x2ee;
+  TxHeader.Identifier = id;
   TxHeader.IdType = FDCAN_STANDARD_ID;
   TxHeader.TxFrameType = FDCAN_DATA_FRAME;
-  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.DataLength = (uint32_t)length << 16;
   TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
   TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
   TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
