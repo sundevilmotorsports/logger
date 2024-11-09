@@ -601,30 +601,8 @@ int main(void)
  */
       uint8_t TxData[8] = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08};
       CAN2_Send_Tx(TxData);
-      // if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK)
-      // {
-      //     uint32_t errorCode = HAL_FDCAN_GetError(&hfdcan2);
-      //     switch (errorCode) {
-      //         case HAL_FDCAN_ERROR_PARAM:
-      //             sprintf(msg, "hey, my error code is: ERROR PARAM (0x20)\r\n");
-      //             CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-      //             break;
-      //         case FDCAN_IR_EP:
-      //             sprintf(msg, "hey, my error code is: ERROR PASSIVE (0x10)\r\n");
-      //             CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-      //             break;
-      //         case FDCAN_IR_BO:
-      //             sprintf(msg, "hey, my error code is: BUS OFF (0x40)\r\n");
-      //             CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-      //             break;
-      //         default:
-      //             sprintf(msg, "hey, my error code is: %lu\r\n", errorCode);
-      //             CDC_Transmit_HS((uint8_t*) msg, strlen(msg));// Fallback to numeric
-      //             break;// Use %lu for uint32_t
+      CAN3_Send_Tx(TxData);
 
-      //     }
-      //         // Optional: handle other errors differently or log them
-      //     }
       }
 
 
@@ -1028,9 +1006,9 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.RxBuffersNbr = 0;
   hfdcan3.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
-  hfdcan3.Init.TxEventsNbr = 0;
-  hfdcan3.Init.TxBuffersNbr = 0;
-  hfdcan3.Init.TxFifoQueueElmtsNbr = 0;
+  hfdcan3.Init.TxEventsNbr = 32;
+  hfdcan3.Init.TxBuffersNbr = 32;
+  hfdcan3.Init.TxFifoQueueElmtsNbr = 32;
   hfdcan3.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan3.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
   if (HAL_FDCAN_Init(&hfdcan3) != HAL_OK)
@@ -1062,6 +1040,52 @@ static void MX_FDCAN3_Init(void)
   }
   HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN3_Init 2 */
+
+}
+
+void CAN3_Send_Tx(uint8_t TxData[8]){
+  //TX TEST CONFIG
+  FDCAN_TxHeaderTypeDef   TxHeader;
+
+  char msg[128];
+
+  /* Prepare Tx Header */
+  TxHeader.Identifier = 0x2ee;
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  TxHeader.DataLength = FDCAN_DLC_BYTES_8;
+  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  TxHeader.MessageMarker = 0x00;
+
+  
+  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan3, &TxHeader, TxData) != HAL_OK)
+  {
+        uint32_t errorCode = HAL_FDCAN_GetError(&hfdcan3);
+        switch (errorCode) {
+            case HAL_FDCAN_ERROR_PARAM:
+                sprintf(msg, "hey, my error code is: ERROR PARAM (0x20)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_EP:
+                sprintf(msg, "hey, my error code is: ERROR PASSIVE (0x10)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_BO:
+                sprintf(msg, "hey, my error code is: BUS OFF (0x40)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              default:
+                sprintf(msg, "hey, my error code is: %lu\r\n", errorCode);
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));// Fallback to numeric
+                break;// Use %lu for uint32_t
+
+        }
+              // Optional: handle other errors differently or log them
+  }
+
 
 }
 
