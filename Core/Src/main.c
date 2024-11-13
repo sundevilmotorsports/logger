@@ -32,8 +32,8 @@
 #include "ina260.h"
 #include "eeprom.h"
 #include "logger.h"
+#include "dtc.h"
 #include "stdbool.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -76,6 +76,9 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
+
+//Stores the Date and Time of the Latest Compile (21 Bytes)
+const char compileDateTime[] = __DATE__ " " __TIME__;
 
 
 enum LogChannel {
@@ -120,6 +123,20 @@ enum LogChannel {
 	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	GPS_FIX,
 	TESTNO,
+	DTC_FLW, DTC_FRW,
+	DTC_RLW, DTC_RRW,
+	DTC_FBP, DTC_RBP,
+	DTC_STP, DTC_FLS,
+	DTC_FRS, DTC_RLS,
+	DTC_RRS, DTC_FLSG,
+	DTC_FRSG, DTC_RLSG,
+	DTC_RRSG, DTC_IMU,
+	DTC_BNT, GPS_0,
+	GPS_1,
+
+  //Removed reporting Latest Build Time in Log Buffer, Reports Directly to USB Debug
+  // BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
+  // BUILDT_11, BUILDT_12, BUILDT_13, BUILDT_14, BUILDT_15, BUILDT_16, BUILDT_17, BUILDT_18, BUILDT_19, BUILDT_20,
 	CH_COUNT
 };
 
@@ -156,8 +173,12 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
+
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               	RxData[8];
+//TX TEST CONFIG
+FDCAN_TxHeaderTypeDef   TxHeader;
+uint8_t               TxData[8];
 volatile uint32_t count = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
@@ -167,11 +188,8 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
-float totalBytesReceived = 0;
-uint32_t lastDataRateTimestamp = 0;
-float dataRateMbits = 0.0000000;
-volatile uint8_t canDataBool = 0;
 
+ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
@@ -186,20 +204,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
-    totalBytesReceived += 8;
+    // totalBytesReceived += 8;
     canFifoFull = 0;
     count += 1;
-
-    if ((HAL_GetTick() - lastDataRateTimestamp >= 1000))//|| (HAL_GetTick() == 5000))
-    {
-        lastDataRateTimestamp = HAL_GetTick();
-
-        // Calculate data rate in Mbits/s if data was received
-        dataRateMbits = ((totalBytesReceived > 0) ? (totalBytesReceived * 8.0) / 1e6 : 0.0);
-        // Reset byte counter for the next period
-        totalBytesReceived = 0;
-    }
-
     if (count > 900000) {
     	count = 0;
     }
@@ -208,53 +215,105 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	drs = RxData[0];
     	break;
     case 0x360:
+    //IMU Data
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	yAccel = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      
+      //IMU DTC Check
+      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x361:
+    //IMU Data
     	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	xGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+
+      //IMU DTC Check
+      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x362:
+    //IMU Data
     	yGyro = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+
+      //IMU DTC Check
+      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x363:
+    	//Front Left Wheel Board
     	flw.rpm = RxData[0] << 8 | RxData[1];
     	flw.objTemp = RxData[2] << 8 | RxData[3];
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - flwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(flwDTC, HAL_GetTick());
+
     	break;
     case 0x364:
+    	//Front Right Wheel Board
     	frw.rpm = RxData[0] << 8 | RxData[1];
     	frw.objTemp = RxData[2] << 8 | RxData[3];
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - frwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(frwDTC, HAL_GetTick());
+
     	break;
     case 0x365:
+    	//Rear Right Wheel Board
     	rrw.rpm = RxData[0] << 8 | RxData[1];
     	rrw.objTemp = RxData[2] << 8 | RxData[3];
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - rrwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rrwDTC, HAL_GetTick());
+
     	break;
     case 0x366:
+    	//Rear Left Wheel Board
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlwDTC, HAL_GetTick());
+
     	break;
     case 0x368:
+    	//Brake Fluid, Throttle Load, and Brake Load
     	brakeFluid = RxData[0] << 8 | RxData[1];
     	throttleLoad = RxData[2] << 8 | RxData[3];
     	brakeLoad = RxData[4] << 8 | RxData[5];
+
+      //Brake and Throttle DTC Check
+      if(HAL_GetTick() - brakeNthrottleDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(brakeNthrottleDTC, HAL_GetTick());
     	break;
     case 0x4e2:
+    	//Front Left String Gauge
     	flsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - flsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(flsDTC, HAL_GetTick());
     	break;
     case 0x4e3:
+    	//Front Right String Gauge
     	frsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - frsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(frsDTC, HAL_GetTick());
     	break;
     case 0x4e4:
+    	//Rear Right String Gauge
     	rrsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - rrsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rrsDTC, HAL_GetTick());
     	break;
     case 0x4e5:
+    	//Rear Left String Gauge
     	rlsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - rlsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlsDTC, HAL_GetTick());
     	break;
     }
 
@@ -331,6 +390,10 @@ int main(void)
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
 
+  //Initialize DTC subsystem
+  DTC_Init(HAL_GetTick());
+
+
   GNSS_Init(&GNSS_Handle, &huart9);
   GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
@@ -358,6 +421,12 @@ int main(void)
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
+  //Write the Date and Time of the Last Build to the logBuffer
+  //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
+  // for(int i=0; i<21; i++){
+  //   logBuffer[BUILDT+i] = compileDateTime[i];
+  // }
+
 
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
@@ -380,19 +449,58 @@ int main(void)
 
   while (1)
   {
+	  //Check the Error State of all the DTC devices at 50 Hz
+	  if(HAL_GetTick() - DTC_PREV_CHECK_TIME >= DTC_CHECK_INTERVAL ){
+		  //Check CAN and ADC Device Response
+		  DTC_Error_All(HAL_GetTick());
+
+      //Check Steering Position Sensor
+		  if(steer.error!=HAL_OK || steer.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_steer);
+
+		  //Check GPS Fix type
+		  if(GNSS_Handle.fixType == 0){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+      } 
+		  else if(GNSS_Handle.fixType == 1){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
+      } 
+
+		  //Update Last Check Time
+		  DTC_PREV_CHECK_TIME = HAL_GetTick();
+	  }
+
+	  //Start Analog Listening
 	  adcEnable();
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_FBP));
-	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_RBP));
-	  loggerEmplaceU16(logBuffer, STEERING, eGetAnalog(&hspi4, ADC_STP));
-	  loggerEmplaceU16(logBuffer, FLSHOCK, eGetAnalog(&hspi4, ADC_FLS));
-	  loggerEmplaceU16(logBuffer, FRSHOCK, eGetAnalog(&hspi4, ADC_FRS));
-	  loggerEmplaceU16(logBuffer, RRSHOCK, eGetAnalog(&hspi4, ADC_RRS));
-	  loggerEmplaceU16(logBuffer, RLSHOCK, eGetAnalog(&hspi4, ADC_RLS));
+
+	  //Receive Analog Sensor Data and Store
+	  fBrakePress = eGetAnalog(&hspi4, ADC_FBP);
+	  rBrakePress = eGetAnalog(&hspi4, ADC_RBP);
+	  steer = eGetAnalog(&hspi4, ADC_STP);
+	  flShock = eGetAnalog(&hspi4, ADC_FLS);
+	  frShock = eGetAnalog(&hspi4, ADC_FRS);
+	  rrShock = eGetAnalog(&hspi4, ADC_RRS);
+	  rlShock = eGetAnalog(&hspi4, ADC_RLS);
+
+
+	  //Log Analog Sensor Data
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fBrakePress.value);
+	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, rBrakePress.value);
+	  loggerEmplaceU16(logBuffer, STEERING, steer.value);
+	  loggerEmplaceU16(logBuffer, FLSHOCK, flShock.value);
+	  loggerEmplaceU16(logBuffer, FRSHOCK, frShock.value);
+	  loggerEmplaceU16(logBuffer, RRSHOCK, rrShock.value);
+	  loggerEmplaceU16(logBuffer, RLSHOCK, rlShock.value);
+
+	  //Stop Analog Listening
 	  adcDisable();
 
+	  //Report Battery Current and Voltage
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
 	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
 
+	  //Report IMU Data
 	  loggerEmplaceU32(logBuffer, IMU_X_ACCEL, xAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
@@ -401,6 +509,7 @@ int main(void)
 	  loggerEmplaceU32(logBuffer, IMU_Y_GYRO, yGyro);
 	  loggerEmplaceU32(logBuffer, IMU_Z_GYRO, zGyro);
 
+	  //Report Wheel Board Sensor Data
 	  loggerEmplaceU16(logBuffer, FLW_AMB, flw.ambTemp);
 	  loggerEmplaceU16(logBuffer, FLW_OBJ, flw.objTemp);
 	  loggerEmplaceU16(logBuffer, FLW_RPM, flw.rpm);
@@ -417,14 +526,41 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RLW_OBJ, rlw.objTemp);
 	  loggerEmplaceU16(logBuffer, RLW_RPM, rlw.rpm);
 
+	  //Report String Gauge Data
 	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
 	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  //Report Brakes and Throttle
 	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
+
+	  //Report DTC Data
+	  logBuffer[DTC_FLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress) ? 1 : 0;
+	  logBuffer[DTC_RBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress) ? 1 : 0;
+	  logBuffer[DTC_STP]  = CHECK_DTC(DTC_Error_State, DTC_Index_steer) ? 1 : 0;
+	  logBuffer[DTC_FLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_flShock) ? 1 : 0;
+	  logBuffer[DTC_FRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_frShock) ? 1 : 0;
+	  logBuffer[DTC_RRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock) ? 1 : 0;
+	  logBuffer[DTC_RLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock) ? 1 : 0;
+	  logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
+	  logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
+	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
+	  logBuffer[DTC_BNT]  = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle) ? 1 : 0;
+	  logBuffer[GPS_0]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+
+
+
+
 
 	  static uint32_t GPS_Timer = 0;
 	  if ((HAL_GetTick() - GPS_Timer) > 900) {
@@ -436,6 +572,24 @@ int main(void)
 		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
+
+      // 		  // Convert GNSS_Handle.lon to a byte array
+		  // TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
+		  // TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
+		  // TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
+		  // TxData[3] = (uint8_t)(GNSS_Handle.lon);
+
+		  // // Convert GNSS_Handle.lat to a byte array
+		  // TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
+		  // TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
+		  // TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
+		  // TxData[7] = (uint8_t)(GNSS_Handle.lat);
+
+      // TxHeader.Identifier = 0x369;
+
+    //   if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK);
+
+
 	  }
 
 	  logBuffer[DRS] = drs;
@@ -445,98 +599,125 @@ int main(void)
 	  if(HAL_GetTick() - usbTimeout > 250) {
 		  usbTimeout = HAL_GetTick();
 		  adcEnable();
+
+      //THESE CASES ARE IN ALPHABETICAL ORDER, PLEASE DO NOT MESS THIS UP - ALEX
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
-		  case 's':
-			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'i':
-			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'c':  // CAN diagnostics output
-		      sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\tCAN Data Rate: %.4f Mbits/s\r\n",
-		              count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0), dataRateMbits);
-	            CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-	            break;
 		  case 'a':
-			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
-					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
-					  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
-					  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
-					  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
-					  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
-					  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
-					  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
-			  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'w':
-			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
-					  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
-					  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
-					  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
-					  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
-					  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  case 'm':
-			  sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'p':
-			  sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 't':
-			  testNo++;
-			  sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  usbBuffer[0] = 'm';
-			  break;
-		  case 'g':
-			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
-				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
-				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-				  GNSS_Handle.lon, GNSS_Handle.lat
-				  );
-		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'b':
-			  sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+          sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
+                  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
+                  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
+                  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
+                  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
+                  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
+                  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
+                  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'b':
+          sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'c':
+          sprintf(msg, "messages: %d\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'd':
+          //DTC Data Return over USB 1/2
+          sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
+                  logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
+                  logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS],
+                  logBuffer[GPS_0], logBuffer[GPS_1]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'e':
+          //DTC Data Return over USB 2/2
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
+                  logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
+                  logBuffer[DTC_IMU], logBuffer[DTC_BNT],
+                  logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'g':
+          sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
+                  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+                  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+                  GNSS_Handle.lon, GNSS_Handle.lat
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'i':
+          sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'm':
+          sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'o':
+          sprintf(msg, "Last Build: %s\r\n", compileDateTime);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'p':
+          sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 's':
+          sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 't':
+          testNo++;
+          sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          usbBuffer[0] = 'm';
+          break;
+      case 'w':
+          sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
+                  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
+                  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
+                  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
+                  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'z':
+          sprintf(msg, "Tx ID: %x\tTx Data: %d %d %d %d %d %d %d %d\r\n", TxHeader.Identifier, TxData[0], TxData[1], TxData[2], TxData[3], TxData[4], TxData[5], TxData[6], TxData[7]);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));

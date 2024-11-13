@@ -1,0 +1,19 @@
+{
+    "files.associations": {
+        "main.h": "c",
+        "stm32h7xx_hal.h": "c",
+        "stm32h7xx_hal_conf.h": "c",
+        "fatfs.h": "c",
+        "usb_device.h": "c",
+        "usbd_cdc_if.h": "c",
+        "usbd_def.h": "c",
+        "stm32h7xx_hal_rcc.h": "c",
+        "stm32h7xx_hal_def.h": "c",
+        "stm32h7xx.h": "c",
+        "stm32h723xx.h": "c",
+        "usbd_cdc.h": "c",
+        "adc.h": "c",
+        "gnss.h": "c"
+    },
+    "makefile.configureOnOpen": true
+}

@@ -39,12 +39,19 @@ uint16_t getAnalog(SPI_HandleTypeDef* hspi, uint8_t channel) {
 	return output;
 }
 
-uint16_t eGetAnalog(SPI_HandleTypeDef* hspi, uint8_t channel) {
+ADC_Result eGetAnalog(SPI_HandleTypeDef* hspi, uint8_t channel) {
+	ADC_Result result;
+
 	// request channel input, read previous request
 	uint8_t channelInput = channel << 3;
 	HAL_SPI_TransmitReceive(hspi, &channelInput, buffer, 1, 1000);
-	HAL_SPI_Receive(hspi, (buffer + sizeof(uint8_t)), 1, 1000);
+	HAL_StatusTypeDef status = HAL_SPI_Receive(hspi, (buffer + sizeof(uint8_t)), 1, 1000);
 	adc[idx] = buffer[0] << 8 | buffer[1]; // update previous request
 	idx = channel;
-	return adc[idx]; // return previous conversion result
+
+	result.error = status;
+	result.value = adc[idx];
+
+
+	return result; // return previous conversion result
 }
