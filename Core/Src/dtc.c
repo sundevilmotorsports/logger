@@ -199,6 +199,9 @@ void CAN_DTC_Error_Update(can_dtc *data, uint32_t time){
 	if(currentTime > data->avgResponse * (1 + data->percentOver/100)){
 		SET_DTC(DTC_Error_State, data->DTC_Code_Index);
 	}
+	else{
+		CLEAR_DTC(DTC_Error_State, data->DTC_Code_Index);
+	}
 	return;
 }
 
@@ -221,8 +224,8 @@ void DTC_Init(uint32_t start_time){
   //Wheel Board DTC Handlers
 	CAN_DTC_Init(frwDTC, DTC_Index_frWheelBoard, 10, 25, start_time);
 	CAN_DTC_Init(flwDTC, DTC_Index_flWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 10, 25, start_time);
+	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 50, 100, start_time);
+	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 50, 100, start_time);
 
   //String Gauge DTC Handlers
 	CAN_DTC_Init(flsDTC, DTC_Index_flStringGauge, 10, 25, start_time);
