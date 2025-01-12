@@ -292,6 +292,11 @@ void GNSS_LoadConfig(GNSS_StateHandle *GNSS) {
 	HAL_Delay(250);
 }
 
+void GNSS_LoadSignalConfig(GNSS_StateHandle *GNSS){
+	HAL_UART_Transmit_DMA(GNSS->huart, setGNSS, sizeof(setGNSS) / sizeof(uint8_t));
+	HAL_Delay(250);
+}
+
 
 
 /*!
