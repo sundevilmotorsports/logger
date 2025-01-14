@@ -160,7 +160,7 @@ void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percen
 	//Circular Buffer to Ensure a Rolling Average
 	data->timeBuffer = (uint32_t *)malloc(measures * sizeof(uint32_t));
     for (int i = 0; i < measures; i++) {
-        data->timeBuffer[i] = 0;
+        data->timeBuffer[i] = start_time;
     }
 	return;
 }
@@ -184,7 +184,7 @@ void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
 //Update the Average Response Measurement of the CAN DTC handler
 void CAN_DTC_Response_Update(can_dtc *data){
 	//Error and Value Checking
-	if(data->init && !data->errState){
+	if(data->init){
 		//Calculate Average Response Time
 		data->avgResponse = data->totalTime/data->measures;
 	}
