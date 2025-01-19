@@ -31,7 +31,7 @@ typedef struct {
 	uint32_t prevTime;
 
 	uint32_t avgResponse; //Store the calculated average response time
-	uint8_t percentOver; //Store the percentage of avg response time over allowed before throwing an error
+	uint16_t percentOver; //Store the percentage of avg response time over allowed before throwing an error
 	uint32_t *timeBuffer;
 
 
@@ -66,10 +66,10 @@ void ADC_DTC_State_Update(adc_dtc *data);
 void ADC_DTC_Error_Update(adc_dtc *data, uint32_t time);
 
 //Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
-void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time);
+void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint16_t percentage_over_allowed, uint32_t start_time);
 
 //Update the measurement state of the CAN DTC handler
-void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime);
+void CAN_DTC_State_Update(can_dtc *data, uint32_t msgTime);
 
 //Update the Average Response Measurement of the CAN DTC handler
 void CAN_DTC_Response_Update(can_dtc *data);

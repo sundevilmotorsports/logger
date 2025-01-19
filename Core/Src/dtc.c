@@ -147,7 +147,7 @@ void ADC_DTC_Error_Update(adc_dtc *data, uint32_t time){
 }
 
 //Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
-void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percentage_over_allowed, uint8_t start_time){
+void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint16_t percentage_over_allowed, uint32_t start_time){
 	data->init = 0;
 	data->bufferIndex = 0;
 	data->errState = 0;
@@ -166,9 +166,10 @@ void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint8_t percen
 }
 
 //Update the measurement state of the CAN DTC handler
-void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
+void CAN_DTC_State_Update(can_dtc *data, uint32_t msgTime){
     uint32_t interval = msgTime - data->prevTime;
     data->prevTime = msgTime;
+
 
     // Update the total time by subtracting the oldest value and adding the new interval
     data->totalTime = data->totalTime - data->timeBuffer[data->bufferIndex] + interval;
@@ -176,8 +177,10 @@ void CAN_DTC_State_Update(can_dtc *data, uint16_t msgTime){
     // Store the new interval in the buffer
     data->timeBuffer[data->bufferIndex] = interval;
 
-    // Update the buffer index
+	// Update the buffer index
     data->bufferIndex = (data->bufferIndex + 1) % data->measures;
+
+
 	return;
 }
 
@@ -186,7 +189,7 @@ void CAN_DTC_Response_Update(can_dtc *data){
 	//Error and Value Checking
 	if(data->init){
 		//Calculate Average Response Time
-		data->avgResponse = data->totalTime/data->measures;
+		data->avgResponse = data->totalTime / data->measures;
 	}
 	return;
 }
@@ -224,8 +227,8 @@ void DTC_Init(uint32_t start_time){
   //Wheel Board DTC Handlers
 	CAN_DTC_Init(frwDTC, DTC_Index_frWheelBoard, 10, 25, start_time);
 	CAN_DTC_Init(flwDTC, DTC_Index_flWheelBoard, 10, 25, start_time);
-	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 50, 100, start_time);
-	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 50, 100, start_time);
+	CAN_DTC_Init(rrwDTC, DTC_Index_rrWheelBoard, 10, 200, start_time);
+	CAN_DTC_Init(rlwDTC, DTC_Index_rlWheelBoard, 10, 200, start_time);
 
   //String Gauge DTC Handlers
 	CAN_DTC_Init(flsDTC, DTC_Index_flStringGauge, 10, 25, start_time);
@@ -234,7 +237,7 @@ void DTC_Init(uint32_t start_time){
 	CAN_DTC_Init(rrsDTC, DTC_Index_rrStringGauge, 10, 25, start_time);
 
 	//IMU DTC Handler
-	CAN_DTC_Init(imuDTC, DTC_Index_IMU, 10, 25, start_time);
+	CAN_DTC_Init(imuDTC, DTC_Index_IMU, 10, 500, start_time);
 
 	//Brake and Throttle DTC Handler
 	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);

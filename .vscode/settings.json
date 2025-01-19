@@ -13,7 +13,8 @@
         "stm32h723xx.h": "c",
         "usbd_cdc.h": "c",
         "adc.h": "c",
-        "gnss.h": "c"
+        "gnss.h": "c",
+        "dtc.h": "c"
     },
     "makefile.configureOnOpen": true
 }

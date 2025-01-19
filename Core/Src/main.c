@@ -178,6 +178,7 @@ FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               RxData[8];
 uint8_t               TxData[8];
 volatile uint32_t count = 0;
+volatile uint32_t imuCount = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 volatile uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
@@ -186,6 +187,7 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
+
 
 ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
 
@@ -216,22 +218,23 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     //IMU Data
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	yAccel = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
       
       //IMU DTC Check
-      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x361:
     //IMU Data
     	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	xGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
 
       //IMU DTC Check
-      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x362:
     //IMU Data
     	yGyro = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
 
       //IMU DTC Check
       if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
@@ -694,6 +697,12 @@ int main(void)
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
+      case 'f':
+        sprintf(msg, "RRW Crnt Buffer: %u\tRLW Crnt Buffer: %u\tRRW Avg: %u\tRLW Avg: %u\tRRW Total: %u\tRLW Total: %u\r\n",
+                rrwDTC->timeBuffer[rrwDTC->bufferIndex], rlwDTC->timeBuffer[rlwDTC->bufferIndex], rrwDTC->avgResponse, rlwDTC->avgResponse, rrwDTC->totalTime, rlwDTC->totalTime
+        );
+        CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+        break;
       case 'g':
           sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
                   GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
@@ -705,6 +714,12 @@ int main(void)
       case 'i':
           sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'k':
+    	    sprintf(msg, "IMU Buffer: %u\tIMU BfrIdx: %u\tIMU Avg: %u\tIMU Total: %u\tIMU Hz: %d\tbffr size: %d\r\n",
+                  imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], sizeof(imuDTC->timeBuffer)
+          );
+          CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
           break;
       case 'm':
           sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
