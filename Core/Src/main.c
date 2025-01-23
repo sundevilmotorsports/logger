@@ -123,16 +123,12 @@ enum LogChannel {
 	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
 	GPS_FIX,
 	TESTNO,
-	DTC_FLW, DTC_FRW,
-	DTC_RLW, DTC_RRW,
-	DTC_FBP, DTC_RBP,
-	DTC_STP, DTC_FLS,
-	DTC_FRS, DTC_RLS,
-	DTC_RRS, DTC_FLSG,
-	DTC_FRSG, DTC_RLSG,
-	DTC_RRSG, DTC_IMU,
-	DTC_BNT, GPS_0,
-	GPS_1,
+	
+  //DTC Index Block
+  DTC_FLW, DTC_FRW, DTC_RLW, 
+  DTC_RRW, DTC_FLSG,DTC_FRSG,
+  DTC_RLSG, DTC_RRSG, DTC_IMU, 
+  DTC_BNT, GPS_0, GPS_1,
 
   //Removed reporting Latest Build Time in Log Buffer, Reports Directly to USB Debug
   // BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
@@ -456,8 +452,6 @@ int main(void)
 		  //Check CAN and ADC Device Response
 		  DTC_Error_All(HAL_GetTick());
 
-      //Check Steering Position Sensor
-		  if(steer.error!=HAL_OK || steer.value > 4096) SET_DTC(DTC_Error_State, DTC_Index_steer);
 
 		  //Check GPS Fix type
 		  if(GNSS_Handle.fixType == 0){
@@ -468,6 +462,10 @@ int main(void)
         SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
         CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
       } 
+      else{
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_1);
+      }
 
 		  //Update Last Check Time
 		  DTC_PREV_CHECK_TIME = HAL_GetTick();
@@ -544,13 +542,6 @@ int main(void)
 	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
 	  logBuffer[DTC_RRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
 	  logBuffer[DTC_RLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
-	  logBuffer[DTC_FBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_fBrakePress) ? 1 : 0;
-	  logBuffer[DTC_RBP]  = CHECK_DTC(DTC_Error_State, DTC_Index_rBrakePress) ? 1 : 0;
-	  logBuffer[DTC_STP]  = CHECK_DTC(DTC_Error_State, DTC_Index_steer) ? 1 : 0;
-	  logBuffer[DTC_FLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_flShock) ? 1 : 0;
-	  logBuffer[DTC_FRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_frShock) ? 1 : 0;
-	  logBuffer[DTC_RRS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrShock) ? 1 : 0;
-	  logBuffer[DTC_RLS]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlShock) ? 1 : 0;
 	  logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
 	  logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
 	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
@@ -565,7 +556,7 @@ int main(void)
 
 
 	  static uint32_t GPS_Timer = 0;
-	  if ((HAL_GetTick() - GPS_Timer) > 900) {
+	  if ((HAL_GetTick() - GPS_Timer) > 40) {
 		  GNSS_ParseBuffer(&GNSS_Handle);
 		  GNSS_GetPVTData(&GNSS_Handle);
 
@@ -681,19 +672,17 @@ int main(void)
           break;
       case 'd':
           //DTC Data Return over USB 1/2
-          sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tFLS: %d\tFRS: %d\tRLS: %d\tRRS: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
+          sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
                   logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
-                  logBuffer[DTC_FLS], logBuffer[DTC_FRS], logBuffer[DTC_RLS], logBuffer[DTC_RRS],
                   logBuffer[GPS_0], logBuffer[GPS_1]
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'e':
           //DTC Data Return over USB 2/2
-          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\tFBP: %d\tRBP: %d\tSTP: %d\r\n",
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\r\n",
                   logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
-                  logBuffer[DTC_IMU], logBuffer[DTC_BNT],
-                  logBuffer[DTC_FBP], logBuffer[DTC_RBP], logBuffer[DTC_STP]
+                  logBuffer[DTC_IMU], logBuffer[DTC_BNT]
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
@@ -716,8 +705,17 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'k':
-    	    sprintf(msg, "IMU Buffer: %u\tIMU BfrIdx: %u\tIMU Avg: %u\tIMU Total: %u\tIMU Hz: %d\tbffr size: %d\r\n",
-                  imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], sizeof(imuDTC->timeBuffer)
+          char result[256];
+          char buffer[50]; // Temporary buffer to hold each integer as a string
+          result[0] = '\0'; // Initialize the result string
+
+          for (int i = 0; i < imuDTC->measures; i++) {
+                sprintf(buffer, "%lu ", imuDTC->timeBuffer[i]);
+                strcat(result, buffer);
+          }
+          
+    	    sprintf(msg, "IMU Buffer: %lu\tIMU BfrIdx: %d\tIMU Avg: %lu\tIMU Total: %lu\tIMU Hz: %lu\tbffr: %s\r\n",
+                  imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], result
           );
           CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
           break;

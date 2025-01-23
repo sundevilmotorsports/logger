@@ -37,33 +37,6 @@ typedef struct {
 
 }can_dtc; //This name needs work I know...
 
-//ADC Data
-typedef struct{
-
-    ADC_Result device;
-    uint8_t init:1; //Limits Storage to a single bit address
-    uint8_t errState:1; //Limits Storage to a single bit address
-    uint8_t measures;
-    uint8_t ADC_Code_Index:5; //Limits Storage to 5 bit addresses maximizing the value at 32
-    uint8_t bufferIndex; //Index to store most recent measurement
-    uint16_t *readBuffer; //Array to store the last n measurements
-    uint32_t total; //Total of all measurements
-    uint16_t avg; //Average of all measurements
-    uint32_t timer; //Timer to check measurement consistency
-    uint32_t timeout; //Time to wait before setting DTC
-    uint8_t range;
-
-} adc_dtc;
-#pragma pack(pop) // Restores default STM32 Byte Padding
-
-//Initialize Analog Device DTC values, defines where to store DTC code and how many times to measure the avg response time
-void ADC_DTC_Init(adc_dtc *data, uint8_t measures, uint8_t index, uint8_t range, uint32_t timeout);
-
-//Update the measurement state of the CAN DTC handler
-void ADC_DTC_State_Update(adc_dtc *data);
-
-//Update the ADC Error State
-void ADC_DTC_Error_Update(adc_dtc *data, uint32_t time);
 
 //Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
 void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint16_t percentage_over_allowed, uint32_t start_time);
@@ -107,16 +80,6 @@ extern can_dtc *imuDTC;
 // Declare pointer to Brake and Throttle DTC Handler
 extern can_dtc *brakeNthrottleDTC;
 
-//Brake Pressure DTC Handler
-extern adc_dtc *fBrakePress_DTC;
-extern adc_dtc *rBrakePress_DTC;
-
-//Shock DTC Handlers
-extern adc_dtc *flShock_DTC;
-extern adc_dtc *frShock_DTC;
-extern adc_dtc *rrShock_DTC;
-extern adc_dtc *rlShock_DTC;
-
 //CAN Device DTC Indexes
 extern const uint8_t DTC_Index_frWheelBoard;
 extern const uint8_t DTC_Index_flWheelBoard;
@@ -133,13 +96,5 @@ extern const uint8_t DTC_Index_brakeNthrottle;
 extern const uint8_t DTC_Index_GPS_0;
 extern const uint8_t DTC_Index_GPS_1;
 
-//ADC Device DTC Indexes
-extern const uint8_t DTC_Index_fBrakePress;
-extern const uint8_t DTC_Index_rBrakePress;
-extern const uint8_t DTC_Index_steer;
-extern const uint8_t DTC_Index_flShock;
-extern const uint8_t DTC_Index_frShock;
-extern const uint8_t DTC_Index_rlShock;
-extern const uint8_t DTC_Index_rrShock;
 
 #endif

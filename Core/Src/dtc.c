@@ -61,91 +61,6 @@ can_dtc *imuDTC = &imuDTC_instance;
 //Brake and Throttle DTC Handler
 can_dtc *brakeNthrottleDTC = &brakeNthrottleDTC_instance;
 
-//Create ADC Handlers
-adc_dtc fBrakePress_instance, rBrakePress_instance, steer_instance, 
-flShock_instance, frShock_instance, rrShock_instance, rlShock_instance, stp_instance;
-
-//Break Pressure DTC Handler
-adc_dtc *fBrakePress_DTC = &fBrakePress_instance;
-adc_dtc *rBrakePress_DTC = &rBrakePress_instance;
-
-//Shock DTC Handlers
-adc_dtc *flShock_DTC = &flShock_instance;
-adc_dtc *frShock_DTC = &frShock_instance;
-adc_dtc *rrShock_DTC = &rrShock_instance;
-adc_dtc *rlShock_DTC = &rlShock_instance;
-adc_dtc *stp_DTC = &stp_instance;
-
-//*******************************************************************
-
-//Initialize Analog Device DTC values, defines where to store DTC code and how many times to measure the avg response time
-void ADC_DTC_Init(adc_dtc *data, uint8_t measures, uint8_t index, uint8_t range, uint32_t timeout){
-	data->init = 0;
-	data->bufferIndex = 0;
-	data->errState = 0;
-	data->measures = measures;
-	data->total = 0;
-	data->avg = 0;
-	data->range = range;
-	data->timeout = timeout;
-	data->timer = 0;
-    data->ADC_Code_Index = index&0x1F; //Bitwise Operation Ensures Index never exceeds 32 and limits Memory Useage
-
-	//Circular Buffer to Ensure a Rolling Average
-	data->readBuffer = (uint16_t *)malloc(measures * sizeof(uint16_t));
-    for (int i = 0; i < measures; i++) {
-        data->readBuffer[i] = 0;
-    }
-	return;
-}
-
-//Update the measurement state of the CAN DTC handler
-void ADC_DTC_State_Update(adc_dtc *data){
-    uint16_t val = data->device.value;
-
-    // Update the total time by subtracting the oldest value and adding the new interval
-    data->total = data->total - data->readBuffer[data->bufferIndex] + val;
-
-    // Store the new interval in the buffer
-    data->readBuffer[data->bufferIndex] = val;
-
-    // Update the buffer index
-    data->bufferIndex = (data->bufferIndex + 1) % data->measures;
-
-    data->avg = data->total/data->measures;
-
-	return;
-}
-
-void ADC_DTC_Error_Update(adc_dtc *data, uint32_t time){
-	uint32_t currentTime = time - data->timer;
-	uint16_t val = data->device.value;
-
-    // Calculate the average value
-    data->avg = data->total / data->measures;
-
-    if (data->device.error != HAL_OK) {
-        SET_DTC(DTC_Error_State, data->ADC_Code_Index);
-    }
-	else if(val > 4096){
-		SET_DTC(DTC_Error_State, data->ADC_Code_Index);
-	}
-    else if (val >= data->avg - data->range && val <= data->avg + data->range) {
-        // If within range, check the duration
-        if (data->timer == 0) {
-            // Start the timer if not already started
-            data->timer = currentTime;
-        } else if ((currentTime - data->timer) > data->timeout) {
-            // If within range for more than 1 second, return true
-            SET_DTC(DTC_Error_State, data->ADC_Code_Index);
-        }
-    } else {
-		CLEAR_DTC(DTC_Error_State, data->ADC_Code_Index);
-    }
-
-    return;
-}
-
 //Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
 void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint16_t percentage_over_allowed, uint32_t start_time){
 	data->init = 0;
@@ -186,10 +101,15 @@ void CAN_DTC_State_Update(can_dtc *data, uint32_t msgTime){
 
 //Update the Average Response Measurement of the CAN DTC handler
 void CAN_DTC_Response_Update(can_dtc *data){
+
+	uint32_t total = 0;
+	for(int i=0; i<data->measures; i++){
+		total += data->timeBuffer[i];
+	}
 	//Error and Value Checking
 	if(data->init){
 		//Calculate Average Response Time
-		data->avgResponse = data->totalTime / data->measures;
+		data->avgResponse = total / data->measures;
 	}
 	return;
 }
@@ -242,19 +162,6 @@ void DTC_Init(uint32_t start_time){
 	//Brake and Throttle DTC Handler
 	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
 
-	//Brake Pressure DTC Handlers
-	ADC_DTC_Init(fBrakePress_DTC, 10, DTC_Index_fBrakePress, 10, 1000);
-	ADC_DTC_Init(rBrakePress_DTC, 10, DTC_Index_rBrakePress, 10, 1000);
-
-	//Shock DTC Handlers
-	ADC_DTC_Init(flShock_DTC, 10, DTC_Index_flShock, 10, 1000);
-	ADC_DTC_Init(frShock_DTC, 10, DTC_Index_frShock, 10, 1000);
-	ADC_DTC_Init(rrShock_DTC, 10, DTC_Index_rrShock, 10, 1000);
-	ADC_DTC_Init(rlShock_DTC, 10, DTC_Index_rlShock, 10, 1000);
-
-	ADC_DTC_Init(stp_DTC, 10, DTC_Index_steer, 10, 30000);
-
-
 
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
 	return;
@@ -272,15 +179,6 @@ void DTC_Error_All(uint32_t time){
 	CAN_DTC_Error_Update(rrsDTC, time);
 	CAN_DTC_Error_Update(imuDTC, time);
 	CAN_DTC_Error_Update(brakeNthrottleDTC, time);
-	
-	//ADC DTC
-	ADC_DTC_Error_Update(fBrakePress_DTC, time);
-	ADC_DTC_Error_Update(rBrakePress_DTC, time);
-	ADC_DTC_Error_Update(flShock_DTC, time);
-	ADC_DTC_Error_Update(frShock_DTC, time);
-	ADC_DTC_Error_Update(rrShock_DTC, time);
-	ADC_DTC_Error_Update(rlShock_DTC, time);
-	ADC_DTC_Error_Update(stp_DTC, time);
 
 	return;
 }
