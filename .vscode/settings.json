@@ -14,7 +14,8 @@
         "usbd_cdc.h": "c",
         "adc.h": "c",
         "gnss.h": "c",
-        "dtc.h": "c"
+        "dtc.h": "c",
+        "typeinfo": "c"
     },
     "makefile.configureOnOpen": true
 }

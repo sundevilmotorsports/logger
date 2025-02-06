@@ -81,60 +81,130 @@ uint8_t usbBuffer[64];
 const char compileDateTime[] = __DATE__ " " __TIME__;
 
 
-enum LogChannel {
-	TS, TS1, TS2, TS3, // timestamp (ms)
-	F_BRAKEPRESSURE, F_BRAKEPRESSURE1, // front brake pressure
-	R_BRAKEPRESSURE, R_BRAKEPRESSURE1, // rear brake pressure
-	STEERING, STEERING1, // steering pot
-	FLSHOCK, FLSHOCK1,
-	FRSHOCK, FRSHOCK1,
-	RRSHOCK, RRSHOCK1,
-	RLSHOCK, RLSHOCK1,
-	CURRENT, CURRENT1,
-	BATTERY, BATTERY1,
-	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3, // mG
-	IMU_Y_ACCEL, IMU_Y_ACCEL1, IMU_Y_ACCEL2, IMU_Y_ACCEL3,
-	IMU_Z_ACCEL, IMU_Z_ACCEL1, IMU_Z_ACCEL2, IMU_Z_ACCEL3,
-	IMU_X_GYRO, IMU_X_GYRO1, IMU_X_GYRO2, IMU_X_GYRO3, // mdps
-	IMU_Y_GYRO, IMU_Y_GYRO1, IMU_Y_GYRO2, IMU_Y_GYRO3,
-	IMU_Z_GYRO, IMU_Z_GYRO1, IMU_Z_GYRO2, IMU_Z_GYRO3,
-	FR_SG, FR_SG1, // 16 bit adc
-	FL_SG, FL_SG1,
-	RL_SG, RL_SG1,
-	RR_SG, RR_SG1,
-	FLW_AMB, FLW_AMB1,
-	FLW_OBJ, FLW_OBJ1,
-	FLW_RPM, FLW_RPM1,
-	FRW_AMB, FRW_AMB1,
-	FRW_OBJ, FRW_OBJ1,
-	FRW_RPM, FRW_RPM1,
-	RRW_AMB, RRW_AMB1,
-	RRW_OBJ, RRW_OBJ1,
-	RRW_RPM, RRW_RPM1,
-	RLW_AMB, RLW_AMB1,
-	RLW_OBJ, RLW_OBJ1,
-	RLW_RPM, RLW_RPM1,
-	BRAKE_FLUID, BRAKE_FLUID1,
-	THROTTLE_LOAD, THROTTLE_LOAD1,
-	BRAKE_LOAD, BRAKE_LOAD1,
-	DRS,
-	GPS_LON, GPS_LON1, GPS_LON2, GPS_LON3,
-	GPS_LAT, GPS_LAT1, GPS_LAT2, GPS_LAT3,
-	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
-	GPS_FIX,
-	TESTNO,
-	
-  //DTC Index Block
-  DTC_FLW, DTC_FRW, DTC_RLW, 
-  DTC_RRW, DTC_FLSG,DTC_FRSG,
-  DTC_RLSG, DTC_RRSG, DTC_IMU, 
-  DTC_BNT, GPS_0, GPS_1,
+// Define your channels using a macro, including some entries with integers at the end
+#define LOG_CHANNELS \
+    X(TS) \
+    X(TS1) \
+    X(TS2) \
+    X(TS3) \
+    X(F_BRAKEPRESSURE) \
+    X(F_BRAKEPRESSURE1) \
+    X(R_BRAKEPRESSURE) \
+    X(R_BRAKEPRESSURE1) \
+    X(STEERING) \
+    X(STEERING1) \
+    X(FLSHOCK) \
+    X(FLSHOCK1) \
+    X(FRSHOCK) \
+    X(FRSHOCK1) \
+    X(RRSHOCK) \
+    X(RRSHOCK1) \
+    X(RLSHOCK) \
+    X(RLSHOCK1) \
+    X(CURRENT) \
+    X(CURRENT1) \
+    X(BATTERY) \
+    X(BATTERY1) \
+    X(IMU_X_ACCEL) \
+    X(IMU_X_ACCEL1) \
+    X(IMU_X_ACCEL2) \
+    X(IMU_X_ACCEL3) \
+    X(IMU_Y_ACCEL) \
+    X(IMU_Y_ACCEL1) \
+    X(IMU_Y_ACCEL2) \
+    X(IMU_Y_ACCEL3) \
+    X(IMU_Z_ACCEL) \
+    X(IMU_Z_ACCEL1) \
+    X(IMU_Z_ACCEL2) \
+    X(IMU_Z_ACCEL3) \
+    X(IMU_X_GYRO) \
+    X(IMU_X_GYRO1) \
+    X(IMU_X_GYRO2) \
+    X(IMU_X_GYRO3) \
+    X(IMU_Y_GYRO) \
+    X(IMU_Y_GYRO1) \
+    X(IMU_Y_GYRO2) \
+    X(IMU_Y_GYRO3) \
+    X(IMU_Z_GYRO) \
+    X(IMU_Z_GYRO1) \
+    X(IMU_Z_GYRO2) \
+    X(IMU_Z_GYRO3) \
+    X(FR_SG) \
+    X(FR_SG1) \
+    X(FL_SG) \
+    X(FL_SG1) \
+    X(RL_SG) \
+    X(RL_SG1) \
+    X(RR_SG) \
+    X(RR_SG1) \
+    X(FLW_AMB) \
+    X(FLW_AMB1) \
+    X(FLW_OBJ) \
+    X(FLW_OBJ1) \
+    X(FLW_RPM) \
+    X(FLW_RPM1) \
+    X(FRW_AMB) \
+    X(FRW_AMB1) \
+    X(FRW_OBJ) \
+    X(FRW_OBJ1) \
+    X(FRW_RPM) \
+    X(FRW_RPM1) \
+    X(RRW_AMB) \
+    X(RRW_AMB1) \
+    X(RRW_OBJ) \
+    X(RRW_OBJ1) \
+    X(RRW_RPM) \
+    X(RRW_RPM1) \
+    X(RLW_AMB) \
+    X(RLW_AMB1) \
+    X(RLW_OBJ) \
+    X(RLW_OBJ1) \
+    X(RLW_RPM) \
+    X(RLW_RPM1) \
+    X(BRAKE_FLUID) \
+    X(BRAKE_FLUID1) \
+    X(THROTTLE_LOAD) \
+    X(THROTTLE_LOAD1) \
+    X(BRAKE_LOAD) \
+    X(BRAKE_LOAD1) \
+    X(DRS) \
+    X(GPS_LON) \
+    X(GPS_LON1) \
+    X(GPS_LON2) \
+    X(GPS_LON3) \
+    X(GPS_LAT) \
+    X(GPS_LAT1) \
+    X(GPS_LAT2) \
+    X(GPS_LAT3) \
+    X(GPS_SPD) \
+    X(GPS_SPD1) \
+    X(GPS_SPD2) \
+    X(GPS_SPD3) \
+    X(GPS_FIX) \
+    X(TESTNO) \
+    X(DTC_FLW) \
+    X(DTC_FRW) \
+    X(DTC_RLW) \
+    X(DTC_RRW) \
+    X(DTC_FLSG) \
+    X(DTC_FRSG) \
+    X(DTC_RLSG) \
+    X(DTC_RRSG) \
+    X(DTC_IMU) \
+    X(GPS_0_) \
+    X(GPS_1_) \
+    X(CH_COUNT)
 
-  //Removed reporting Latest Build Time in Log Buffer, Reports Directly to USB Debug
-  // BUILDT, BUILDT_1, BUILDT_2, BUILDT_3, BUILDT_4, BUILDT_5, BUILDT_6, BUILDT_7, BUILDT_8, BUILDT_9, BUILDT_10,
-  // BUILDT_11, BUILDT_12, BUILDT_13, BUILDT_14, BUILDT_15, BUILDT_16, BUILDT_17, BUILDT_18, BUILDT_19, BUILDT_20,
-	CH_COUNT
+// Helper macros to detect if a name contains a digit at the end
+#define IS_DIGIT_END(str) (isdigit((unsigned char)__builtin_strrchr(str, '\0')[-1]))
+
+
+enum LogChannel {
+    #define X(channel) channel,
+    LOG_CHANNELS
+    #undef X
 };
+
 
 uint8_t logBuffer[CH_COUNT];
 
@@ -152,6 +222,7 @@ static void MX_UART9_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 static void MX_FDCAN2_Init(void);
+char *filterLogChannelNames();
 /* USER CODE BEGIN PFP */
 // calculate temperature in celsius
 float mlx90614(uint16_t temp);
@@ -274,15 +345,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//If statement ensures update runs only at 50Hz
     	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlwDTC, HAL_GetTick());
 
-    	break;
-    case 0x368:
-    	//Brake Fluid, Throttle Load, and Brake Load
-    	brakeFluid = RxData[0] << 8 | RxData[1];
-    	throttleLoad = RxData[2] << 8 | RxData[3];
-    	brakeLoad = RxData[4] << 8 | RxData[5];
-
-      //Brake and Throttle DTC Check
-      if(HAL_GetTick() - brakeNthrottleDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(brakeNthrottleDTC, HAL_GetTick());
     	break;
     case 0x4e2:
     	//Front Left String Gauge
@@ -413,11 +475,35 @@ int main(void)
   eepromRead(&hi2c2, runNoAddr, &runNo);
   uint8_t currRunNo = runNo;
 
-  sprintf(name, "data%d.benji", runNo);
+  sprintf(name, "data%d.benji2", runNo);
   if(++runNo == 255) {
 	  runNo = 0;
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
+
+
+  
+  /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+  /***************************** PROCEED WITH CAUTION ************************************/
+  
+  char *benji2_log_header = filterLogChannelNames();
+
+
+  //Write how long the header string is
+  if(f_write(&file, sizeof(benji2_log_header), sizeof(sizeof(benji2_log_header)), &wbytes) == FR_OK){
+    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  }
+  f_sync(&file);
+
+  //Write out the header string following the length declaration
+  if(f_write(&file, &benji2_log_header, sizeof(benji2_log_header), &wbytes) == FR_OK) {
+	  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	}
+	f_sync(&file);
+
+  free(benji2_log_header);
+
+  /******************************* END OF DELIRIUM **************************************/  
 
   //Write the Date and Time of the Last Build to the logBuffer
   //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
@@ -547,9 +633,8 @@ int main(void)
 	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
 	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
 	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
-	  logBuffer[DTC_BNT]  = CHECK_DTC(DTC_Error_State, DTC_Index_brakeNthrottle) ? 1 : 0;
-	  logBuffer[GPS_0]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
-	  logBuffer[GPS_1]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+	  logBuffer[GPS_0_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
 
 
 
@@ -674,15 +759,15 @@ int main(void)
           //DTC Data Return over USB 1/2
           sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
                   logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
-                  logBuffer[GPS_0], logBuffer[GPS_1]
+                  logBuffer[GPS_0_], logBuffer[GPS_1_]
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'e':
           //DTC Data Return over USB 2/2
-          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tBNT: %d\r\n",
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\r\n",
                   logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
-                  logBuffer[DTC_IMU], logBuffer[DTC_BNT]
+                  logBuffer[DTC_IMU]
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
@@ -1427,6 +1512,45 @@ void Error_Handler(void)
   {
   }
   /* USER CODE END Error_Handler_Debug */
+}
+
+// Function to filter strings that do not end with a digit and return a formatted string
+char *filterLogChannelNames() {
+    char *outputList[] = {
+        #define X(channel) {IS_DIGIT_END(#channel) ? NULL : #channel ","},
+            LOG_CHANNELS
+        #undef X
+
+    };
+    size_t output_size = sizeof(outputList) / sizeof(char *);
+    for(int i = output_size - 1; i >= 0; i--){
+        if(outputList[i] == NULL) output_size--;
+        else break;
+    }
+
+    // Allocate maximum size of output string and initialize it to an empty string
+    char *tempOutStr = malloc(output_size * sizeof(char *));
+    if (tempOutStr == NULL) {
+        return NULL;
+    }
+    tempOutStr[0] = '\0'; // Initialize the first character to null terminator
+
+
+    for(int i=0; i<output_size; i++){
+        if(outputList[i]){
+            if(i<output_size-1)
+                strcat(tempOutStr, outputList[i]);
+            else{
+                char temp[strlen(outputList[i])];
+                strcpy(temp, outputList[i]);
+                temp[strlen(temp) - 1] = '\0';
+                strcat(tempOutStr, temp);
+            }
+        }
+    }
+
+    
+    return tempOutStr;
 }
 
 #ifdef  USE_FULL_ASSERT
