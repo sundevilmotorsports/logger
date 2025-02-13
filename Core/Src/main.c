@@ -489,14 +489,15 @@ int main(void)
   char *benji2_log_header = filterLogChannelNames();
 
 
+
   //Write how long the header string is
-  if(f_write(&file, sizeof(benji2_log_header), sizeof(sizeof(benji2_log_header)), &wbytes) == FR_OK){
+  if(f_write(&file, strlen(benji2_log_header), sizeof(size_t), &wbytes) == FR_OK){
     //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
   }
   f_sync(&file);
 
   //Write out the header string following the length declaration
-  if(f_write(&file, &benji2_log_header, sizeof(benji2_log_header), &wbytes) == FR_OK) {
+  if(f_write(&file, &benji2_log_header, strlen(benji2_log_header), &wbytes) == FR_OK) {
 	  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	}
 	f_sync(&file);
