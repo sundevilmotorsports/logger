@@ -222,7 +222,7 @@ static void MX_UART9_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 static void MX_FDCAN2_Init(void);
-char *filterLogChannelNames();
+char *filterLogChannelNames(unsigned int *outLength);
 /* USER CODE BEGIN PFP */
 // calculate temperature in celsius
 float mlx90614(uint16_t temp);
@@ -482,30 +482,6 @@ int main(void)
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
 
-  
-  /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
-  /***************************** PROCEED WITH CAUTION ************************************/
-  
-  char *benji2_log_header = filterLogChannelNames();
-
-
-
-  //Write how long the header string is
-  if(f_write(&file, strlen(benji2_log_header), sizeof(size_t), &wbytes) == FR_OK){
-    //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-  }
-  f_sync(&file);
-
-  //Write out the header string following the length declaration
-  if(f_write(&file, &benji2_log_header, strlen(benji2_log_header), &wbytes) == FR_OK) {
-	  //HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	}
-	f_sync(&file);
-
-  free(benji2_log_header);
-
-  /******************************* END OF DELIRIUM **************************************/  
-
   //Write the Date and Time of the Last Build to the logBuffer
   //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
   // for(int i=0; i<21; i++){
@@ -529,6 +505,38 @@ int main(void)
 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
 	  Error_Handler();
   }
+
+    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+  /***************************** PROCEED WITH CAUTION ************************************/
+  unsigned int size_of_benji2_header = 0;
+  char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+
+  // Calculate the size of each chunk
+  unsigned int chunk_size = size_of_benji2_header / 4;
+  unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
+
+  // Write how long the header string is
+  if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
+      // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  }
+  f_sync(&file);
+
+  // Write out the header string in 4 chunks
+  for (int i = 0; i < 4; i++) {
+      unsigned int current_chunk_size = chunk_size;
+      if (i == 3) {
+          // Add the remaining bytes to the last chunk
+          current_chunk_size += remaining_bytes;
+      }
+
+      if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
+          // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+      }
+      f_sync(&file);
+  }
+
+
+  /******************************* END OF DELIRIUM **************************************/  
 
 
 
@@ -694,8 +702,9 @@ int main(void)
 
 	  // END TX TEST CODE
 
-	  logBuffer[DRS] = drs;
+	  logBuffer[DRS] = 101; //drs
 	  logBuffer[TESTNO] = testNo;
+    logBuffer[CH_COUNT] = 101;
 
 	  static uint32_t usbTimeout = 0;
 	  if(HAL_GetTick() - usbTimeout > 250) {
@@ -836,9 +845,11 @@ int main(void)
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
-      // case 'z':
-      //     sprintf(msg, "Tx ID: %x\tTx Data: %d %d %d %d %d %d %d %d\r\n", TxHeader.Identifier, TxData[0], TxData[1], TxData[2], TxData[3], TxData[4], TxData[5], TxData[6], TxData[7]);
-      //     CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+
+       case 'z':
+           sprintf(msg, "Benji2 HeaderLen: %d\tBenji2 Header: \r\n", size_of_benji2_header);
+           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+           break;
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -1516,18 +1527,19 @@ void Error_Handler(void)
 }
 
 // Function to filter strings that do not end with a digit and return a formatted string
-char *filterLogChannelNames() {
+char *filterLogChannelNames(unsigned int *outLength) {
     char *outputList[] = {
-        #define X(channel) {IS_DIGIT_END(#channel) ? NULL : #channel ","},
+        #define X(channel) {#channel ","}, //{IS_DIGIT_END(#channel) ? NULL : #channel ","}
             LOG_CHANNELS
         #undef X
 
     };
     size_t output_size = sizeof(outputList) / sizeof(char *);
-    for(int i = output_size - 1; i >= 0; i--){
-        if(outputList[i] == NULL) output_size--;
-        else break;
-    }
+    // for(int i = output_size - 1; i >= 0; i--){
+    //     if(outputList[i] == NULL) output_size--;
+    //     else break;
+    // }
+
 
     // Allocate maximum size of output string and initialize it to an empty string
     char *tempOutStr = malloc(output_size * sizeof(char *));
@@ -1549,6 +1561,9 @@ char *filterLogChannelNames() {
             }
         }
     }
+
+    
+    *outLength = (unsigned int)strlen(tempOutStr) + 3;
 
     
     return tempOutStr;
