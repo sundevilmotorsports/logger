@@ -15,7 +15,8 @@
         "adc.h": "c",
         "gnss.h": "c",
         "dtc.h": "c",
-        "typeinfo": "c"
+        "typeinfo": "c",
+        "eeprom.h": "c"
     },
     "makefile.configureOnOpen": true
 }
