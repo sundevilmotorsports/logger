@@ -256,14 +256,6 @@ volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 
 
-//Allocate memory for driver name (log filename)
-const uint8_t driverLen = 8;
-volatile char driver[driverLen]; //Volatile bc controlled by telemetry receive which sends over CAN
-
-//TODO: Possibly wrong address, assuming address 5 because runNo is 1 byte long
-const uint16_t driverNameAddr = 5;
-
-
 ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
@@ -382,13 +374,6 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       //String Gauge DTC Check
       if(HAL_GetTick() - rlsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlsDTC, HAL_GetTick());
     	break;
-    case 0xFFF:
-          char newDriver[driverLen];
-          for(int i=0; i<8; i++) newDriver[i] = (char)RxData[i];
-          
-          //Write current driver name to eeprom
-          eepromWriteString(&hi2c2, driverNameAddr, &newDriver, driverLen);
-
     }
 
 
@@ -479,7 +464,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   char msg[128];
-  char name[24]; // Increased size by 8 char to allow for driver names in Log filename
+  char name[16];
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 
@@ -487,37 +472,10 @@ int main(void)
 
   uint8_t runNo = 0;
   uint16_t runNoAddr = 4;
-  
-  
   eepromRead(&hi2c2, runNoAddr, &runNo);
   uint8_t currRunNo = runNo;
 
-  //Read String Stored in EEPROM and write to driver
-  HAL_StatusTypeDef driveNameSuccess = eepromReadString(&hi2c2, driverNameAddr, &driver, driverLen);
-
-  //If driver is not empty then add it to log filename
-  if (driver[0] != '\0' && driveNameSuccess == HAL_OK) {
-    // //Write current driver name to eeprom
-    // eepromWriteString(&hi2c2, driverNameAddr, &driver, driverLen);
-
-    //Make a local copy of driver name with correct number of characters
-    size_t len = strlen(driver);
-    char *driverCopy = malloc(len + 1);  // +1 for the null terminator
-
-    //If memory allocate successful, then add the driver name to the log filename
-    if (driverCopy != NULL) {
-        strcpy(driverCopy, driver);
-        sprintf(name, "data%d%s.benji2", runNo, driverCopy);
-
-        //Free allocated memory for driver name
-        free(driverCopy);
-    }
-  }
-  else{
-    //If there's no driver name, then don't write one
-    sprintf(name, "data%d.benji2", runNo);
-  }
-
+  sprintf(name, "data%d.benji2", runNo);
   if(++runNo == 255) {
 	  runNo = 0;
   }
@@ -530,11 +488,7 @@ int main(void)
   //   logBuffer[BUILDT+i] = compileDateTime[i];
   // }
 
-  //TODO: Implement changing log files within logger main loop
-  // 1.) Be able to open and close log file
-  // 2.) Be able to change the log filename from CAN message
-  // 3.) Be able to change the log filename from CDC transmit
-  // 4.) Be able to increment run number based on test number or other input
+
 
   if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
   {
@@ -827,12 +781,12 @@ int main(void)
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
-      // case 'f':
-      //   sprintf(msg, "RRW Crnt Buffer: %u\tRLW Crnt Buffer: %u\tRRW Avg: %u\tRLW Avg: %u\tRRW Total: %u\tRLW Total: %u\r\n",
-      //           rrwDTC->timeBuffer[rrwDTC->bufferIndex], rlwDTC->timeBuffer[rlwDTC->bufferIndex], rrwDTC->avgResponse, rlwDTC->avgResponse, rrwDTC->totalTime, rlwDTC->totalTime
-      //   );
-      //   CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-      //   break;
+      case 'f':
+        sprintf(msg, "RRW Crnt Buffer: %u\tRLW Crnt Buffer: %u\tRRW Avg: %u\tRLW Avg: %u\tRRW Total: %u\tRLW Total: %u\r\n",
+                rrwDTC->timeBuffer[rrwDTC->bufferIndex], rlwDTC->timeBuffer[rlwDTC->bufferIndex], rrwDTC->avgResponse, rlwDTC->avgResponse, rrwDTC->totalTime, rlwDTC->totalTime
+        );
+        CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+        break;
       case 'g':
           sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
                   GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
@@ -845,21 +799,21 @@ int main(void)
           sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
-      // case 'k':
-      //     char result[256];
-      //     char buffer[50]; // Temporary buffer to hold each integer as a string
-      //     result[0] = '\0'; // Initialize the result string
+      case 'k':
+          char result[256];
+          char buffer[50]; // Temporary buffer to hold each integer as a string
+          result[0] = '\0'; // Initialize the result string
 
-      //     for (int i = 0; i < imuDTC->measures; i++) {
-      //           sprintf(buffer, "%lu ", imuDTC->timeBuffer[i]);
-      //           strcat(result, buffer);
-      //     }
+          for (int i = 0; i < imuDTC->measures; i++) {
+                sprintf(buffer, "%lu ", imuDTC->timeBuffer[i]);
+                strcat(result, buffer);
+          }
           
-    	//     sprintf(msg, "IMU Buffer: %lu\tIMU BfrIdx: %d\tIMU Avg: %lu\tIMU Total: %lu\tIMU Hz: %lu\tbffr: %s\r\n",
-      //             imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], result
-      //     );
-      //     CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
-      //     break;
+    	    sprintf(msg, "IMU Buffer: %lu\tIMU BfrIdx: %d\tIMU Avg: %lu\tIMU Total: %lu\tIMU Hz: %lu\tbffr: %s\r\n",
+                  imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], result
+          );
+          CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
+          break;
       case 'm':
           sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));

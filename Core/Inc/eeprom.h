@@ -15,10 +15,6 @@
 
 HAL_StatusTypeDef eepromWrite(I2C_HandleTypeDef* hi2c, uint16_t addr, uint8_t* data);
 HAL_StatusTypeDef eepromRead(I2C_HandleTypeDef* hi2c, uint16_t addr, uint8_t* data);
-HAL_StatusTypeDef eepromReadString(I2C_HandleTypeDef* hi2c, uint16_t addr, char* data, uint8_t len);
-HAL_StatusTypeDef eepromWriteString(I2C_HandleTypeDef* hi2c, uint16_t addr, char* data, uint8_t len);
-
-
 
 
 #endif /* INC_EEPROM_H_ */
