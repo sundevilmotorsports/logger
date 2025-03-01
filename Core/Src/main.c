@@ -223,7 +223,6 @@ static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 static void MX_FDCAN2_Init(void);
 char *filterLogChannelNames(unsigned int *outLength);
-void start_logfile(char* name, UINT* wbytes);
 /* USER CODE BEGIN PFP */
 // calculate temperature in celsius
 float mlx90614(uint16_t temp);
@@ -260,13 +259,10 @@ volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 //Allocate memory for driver name (log filename)
 const uint8_t driverLen = 8;
 volatile char driver[driverLen]; //Volatile bc controlled by telemetry receive which sends over CAN
-volatile char name[16 + driverLen]; // Increased size by driverLen # of char to allow for driver names in Log filename
 
+//TODO: Possibly wrong address, assuming address 5 because runNo is 1 byte long
+const uint16_t driverNameAddr = 5;
 
-volatile uint8_t runNo = 0;
-const uint16_t runNoAddr = 4;
-
-volatile UINT wbytes;
 
 ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
 
@@ -386,14 +382,12 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       //String Gauge DTC Check
       if(HAL_GetTick() - rlsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlsDTC, HAL_GetTick());
     	break;
-    case 0x4e6: //First Telemetry Driver name Send
+    case 0xFFF:
           char newDriver[driverLen];
           for(int i=0; i<8; i++) newDriver[i] = (char)RxData[i];
-          f_close(&file);
-          eepromRead(&hi2c2, runNoAddr, &runNo);
-          sprintf(name, "data%d%s.benji2", runNo, newDriver);
-          start_logfile(name, &wbytes);
-          break;
+          
+          //Write current driver name to eeprom
+          eepromWriteString(&hi2c2, driverNameAddr, &newDriver, driverLen);
 
     }
 
@@ -485,83 +479,107 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   char msg[128];
-  // char name[16 + driverLen]; // Increased size by driverLen # of char to allow for driver names in Log filename
+  char name[24]; // Increased size by 8 char to allow for driver names in Log filename
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 
-  // UINT wbytes; // unsigned int
+  UINT wbytes; // unsigned int
 
-  // uint8_t runNo = 0;
-  // uint16_t runNoAddr = 4;
+  uint8_t runNo = 0;
+  uint16_t runNoAddr = 4;
   
   
   eepromRead(&hi2c2, runNoAddr, &runNo);
   uint8_t currRunNo = runNo;
-  sprintf(name, "data%d.benji2", runNo);
+
+  //Read String Stored in EEPROM and write to driver
+  HAL_StatusTypeDef driveNameSuccess = eepromReadString(&hi2c2, driverNameAddr, &driver, driverLen);
+
+  //If driver is not empty then add it to log filename
+  if (driver[0] != '\0' && driveNameSuccess == HAL_OK) {
+    // //Write current driver name to eeprom
+    // eepromWriteString(&hi2c2, driverNameAddr, &driver, driverLen);
+
+    //Make a local copy of driver name with correct number of characters
+    size_t len = strlen(driver);
+    char *driverCopy = malloc(len + 1);  // +1 for the null terminator
+
+    //If memory allocate successful, then add the driver name to the log filename
+    if (driverCopy != NULL) {
+        strcpy(driverCopy, driver);
+        sprintf(name, "data%d%s.benji2", runNo, driverCopy);
+
+        //Free allocated memory for driver name
+        free(driverCopy);
+    }
+  }
+  else{
+    //If there's no driver name, then don't write one
+    sprintf(name, "data%d.benji2", runNo);
+  }
+
   if(++runNo == 255) {
 	  runNo = 0;
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
-  start_logfile(name, &wbytes);
 
-
-  // //Write the Date and Time of the Last Build to the logBuffer
-  // //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
-  // // for(int i=0; i<21; i++){
-  // //   logBuffer[BUILDT+i] = compileDateTime[i];
-  // // }
-
-  // //TODO: Implement changing log files within logger main loop
-  // // 1.) Be able to open and close log file
-  // // 2.) Be able to change the log filename from CAN message
-  // // 3.) Be able to change the log filename from CDC transmit
-  // // 4.) Be able to increment run number based on test number or other input
-
-  // if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
-  // {
-	//   FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
-	//   if(res != FR_OK)
-	//   {
-	// 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	// 	  Error_Handler();
-	//   }
+  //Write the Date and Time of the Last Build to the logBuffer
+  //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
+  // for(int i=0; i<21; i++){
+  //   logBuffer[BUILDT+i] = compileDateTime[i];
   // }
 
-  // if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
-  // {
-	//   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	//   Error_Handler();
-  // }
+  //TODO: Implement changing log files within logger main loop
+  // 1.) Be able to open and close log file
+  // 2.) Be able to change the log filename from CAN message
+  // 3.) Be able to change the log filename from CDC transmit
+  // 4.) Be able to increment run number based on test number or other input
 
-  //   /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
-  // /***************************** PROCEED WITH CAUTION ************************************/
-  // unsigned int size_of_benji2_header = 0;
-  // char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+  if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
+  {
+	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
+	  if(res != FR_OK)
+	  {
+		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+		  Error_Handler();
+	  }
+  }
 
-  // // Calculate the size of each chunk
-  // unsigned int chunk_size = size_of_benji2_header / 4;
-  // unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
+  if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  {
+	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	  Error_Handler();
+  }
 
-  // // Write how long the header string is
-  // if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
-  //     // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-  // }
-  // f_sync(&file);
+    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+  /***************************** PROCEED WITH CAUTION ************************************/
+  unsigned int size_of_benji2_header = 0;
+  char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
 
-  // // Write out the header string in 4 chunks
-  // for (int i = 0; i < 4; i++) {
-  //     unsigned int current_chunk_size = chunk_size;
-  //     if (i == 3) {
-  //         // Add the remaining bytes to the last chunk
-  //         current_chunk_size += remaining_bytes;
-  //     }
+  // Calculate the size of each chunk
+  unsigned int chunk_size = size_of_benji2_header / 4;
+  unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
 
-  //     if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
-  //         // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-  //     }
-  //     f_sync(&file);
-  // }
+  // Write how long the header string is
+  if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
+      // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  }
+  f_sync(&file);
+
+  // Write out the header string in 4 chunks
+  for (int i = 0; i < 4; i++) {
+      unsigned int current_chunk_size = chunk_size;
+      if (i == 3) {
+          // Add the remaining bytes to the last chunk
+          current_chunk_size += remaining_bytes;
+      }
+
+      if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
+          // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+      }
+      f_sync(&file);
+  }
 
 
   /******************************* END OF DELIRIUM **************************************/  
@@ -874,10 +892,10 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
 
-      //  case 'z':
-      //      sprintf(msg, "Benji2 HeaderLen: %d\tBenji2 Header: \r\n", size_of_benji2_header);
-      //      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-      //      break;
+       case 'z':
+           sprintf(msg, "Benji2 HeaderLen: %d\tBenji2 Header: \r\n", size_of_benji2_header);
+           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+           break;
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -1595,64 +1613,6 @@ char *filterLogChannelNames(unsigned int *outLength) {
 
     
     return tempOutStr;
-}
-
-void start_logfile(char* name, UINT* wbytes){
-  uint8_t runNo = 0;
-  
-  eepromRead(&hi2c2, runNoAddr, &runNo);
-  uint8_t currRunNo = runNo;
-  sprintf(name, "data%d.benji2", runNo);
-  if(++runNo == 255) {
-	  runNo = 0;
-  }
-  eepromWrite(&hi2c2, runNoAddr, &runNo);
-
-  if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
-  {
-	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
-	  if(res != FR_OK)
-	  {
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-		  Error_Handler();
-	  }
-  }
-
-  if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
-  {
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	  Error_Handler();
-    
-  }
-
-    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
-  /***************************** PROCEED WITH CAUTION ************************************/
-  unsigned int size_of_benji2_header = 0;
-  char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
-
-  // Calculate the size of each chunk
-  unsigned int chunk_size = size_of_benji2_header / 4;
-  unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
-
-  // Write how long the header string is
-  if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
-      // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-  }
-  f_sync(&file);
-
-  // Write out the header string in 4 chunks
-  for (int i = 0; i < 4; i++) {
-      unsigned int current_chunk_size = chunk_size;
-      if (i == 3) {
-          // Add the remaining bytes to the last chunk
-          current_chunk_size += remaining_bytes;
-      }
-
-      if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
-          // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-      }
-      f_sync(&file);
-  }
 }
 
 #ifdef  USE_FULL_ASSERT
