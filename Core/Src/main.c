@@ -53,8 +53,6 @@
 
 /* Private variables ---------------------------------------------------------*/
 
-#define driverLen 8
-
 FDCAN_HandleTypeDef hfdcan2;
 FDCAN_HandleTypeDef hfdcan3;
 
@@ -259,7 +257,8 @@ volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 
 
-
+//Allocate memory for driver name (log filename)
+const uint8_t driverLen = 8;
 volatile char driver[driverLen]; //Volatile bc controlled by telemetry receive which sends over CAN
 volatile char name[16 + driverLen]; // Increased size by driverLen # of char to allow for driver names in Log filename
 
