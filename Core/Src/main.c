@@ -481,59 +481,60 @@ int main(void)
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
+  writeBenji2HeaderToFile(name);
 
-  //Write the Date and Time of the Last Build to the logBuffer
-  //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
-  // for(int i=0; i<21; i++){
-  //   logBuffer[BUILDT+i] = compileDateTime[i];
+  // //Write the Date and Time of the Last Build to the logBuffer
+  // //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
+  // // for(int i=0; i<21; i++){
+  // //   logBuffer[BUILDT+i] = compileDateTime[i];
+  // // }
+
+
+
+  // if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
+  // {
+	//   FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
+	//   if(res != FR_OK)
+	//   {
+	// 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	// 	  Error_Handler();
+	//   }
   // }
 
+  // if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  // {
+	//   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	//   Error_Handler();
+  // }
 
+  //   /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+  // /***************************** PROCEED WITH CAUTION ************************************/
+  // unsigned int size_of_benji2_header = 0;
+  // char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
 
-  if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
-  {
-	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
-	  if(res != FR_OK)
-	  {
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-		  Error_Handler();
-	  }
-  }
+  // // Calculate the size of each chunk
+  // unsigned int chunk_size = size_of_benji2_header / 4;
+  // unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
 
-  if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
-  {
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	  Error_Handler();
-  }
+  // // Write how long the header string is
+  // if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
+  //     // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  // }
+  // f_sync(&file);
 
-    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
-  /***************************** PROCEED WITH CAUTION ************************************/
-  unsigned int size_of_benji2_header = 0;
-  char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+  // // Write out the header string in 4 chunks
+  // for (int i = 0; i < 4; i++) {
+  //     unsigned int current_chunk_size = chunk_size;
+  //     if (i == 3) {
+  //         // Add the remaining bytes to the last chunk
+  //         current_chunk_size += remaining_bytes;
+  //     }
 
-  // Calculate the size of each chunk
-  unsigned int chunk_size = size_of_benji2_header / 4;
-  unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
-
-  // Write how long the header string is
-  if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
-      // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-  }
-  f_sync(&file);
-
-  // Write out the header string in 4 chunks
-  for (int i = 0; i < 4; i++) {
-      unsigned int current_chunk_size = chunk_size;
-      if (i == 3) {
-          // Add the remaining bytes to the last chunk
-          current_chunk_size += remaining_bytes;
-      }
-
-      if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
-          // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-      }
-      f_sync(&file);
-  }
+  //     if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
+  //         // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  //     }
+  //     f_sync(&file);
+  // }
 
 
   /******************************* END OF DELIRIUM **************************************/  
@@ -815,7 +816,7 @@ int main(void)
           CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
           break;
       case 'm':
-          sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
+          sprintf(msg, "current file: %s\ttest no: %d\r\n", name, testNo);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'o':
@@ -847,8 +848,21 @@ int main(void)
           break;
 
        case 'z':
-           sprintf(msg, "Benji2 HeaderLen: %d\tBenji2 Header: \r\n", size_of_benji2_header);
+            f_close(&file);
+            eepromRead(&hi2c2, runNoAddr, &runNo);
+            uint8_t currRunNo = runNo;
+          
+            sprintf(name, "data%d.benji2", runNo);
+            if(++runNo == 255) {
+              runNo = 0;
+            }
+            eepromWrite(&hi2c2, runNoAddr, &runNo);
+          
+            writeBenji2HeaderToFile(name);
+
+           sprintf(msg, "Incrementing Log File!\r\nCurrent Log File: %s\r\n", name);
            CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+           usbBuffer[0] = 'm';
            break;
 		  default:
 			  sprintf(msg, "no option selected\r\n");
@@ -1567,6 +1581,59 @@ char *filterLogChannelNames(unsigned int *outLength) {
 
     
     return tempOutStr;
+}
+
+
+void writeBenji2HeaderToFile(const char *filename) {
+    UINT wbytes; // Variable to hold number of bytes written
+
+    // Mount the filesystem using the global diskPath and fatFS
+    if (f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK) {
+        FRESULT res = FR_OK; // If needed, a formatting call (e.g., f_mkfs) would be added here.
+        if (res != FR_OK) {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+            Error_Handler();
+        }
+    }
+
+    // Open the file (using the filename parameter) for appending and writing
+    if (f_open(&file, (TCHAR const*) filename, FA_OPEN_APPEND | FA_WRITE) != FR_OK) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+        Error_Handler();
+    }
+
+    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+    /***************************** PROCEED WITH CAUTION ************************************/
+    unsigned int size_of_benji2_header = 0;
+    char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+
+    // Calculate the size of each chunk and handle any remaining bytes
+    unsigned int chunk_size = size_of_benji2_header / 4;
+    unsigned int remaining_bytes = size_of_benji2_header % 4;
+
+    // Write how long the header string is to the file
+    if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) != FR_OK) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+        Error_Handler();
+    }
+    f_sync(&file);
+
+    // Write out the header string in 4 chunks
+    for (int i = 0; i < 4; i++) {
+        unsigned int current_chunk_size = chunk_size;
+        if (i == 3) {
+            // Add any remaining bytes to the last chunk
+            current_chunk_size += remaining_bytes;
+        }
+        if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) != FR_OK) {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+            Error_Handler();
+        }
+        f_sync(&file);
+    }
+
+    // Free the header string allocated by filterLogChannelNames
+    free(benji2_log_header);
 }
 
 #ifdef  USE_FULL_ASSERT
