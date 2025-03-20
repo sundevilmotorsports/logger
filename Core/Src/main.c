@@ -193,7 +193,8 @@ const char compileDateTime[] = __DATE__ " " __TIME__;
     X(DTC_IMU) \
     X(GPS_0_) \
     X(GPS_1_) \
-    X(ACT_ROLL) \ 
+    X(F_ACT_ROLL) \
+    X(R_ACT_ROLL) \
     X(CH_COUNT)
 
 // Helper macros to detect if a name contains a digit at the end
@@ -241,7 +242,9 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
-uint8_t activeRollVal = 0;
+uint8_t activeRollVal_rear = 0;
+uint8_t activeRollVal_front = 0;
+
 
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               RxData[8];
@@ -648,7 +651,8 @@ int main(void)
 	  logBuffer[GPS_0_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
 	  logBuffer[GPS_1_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
 
-    logBuffer[ACT_ROLL] = activeRollVal;
+    logBuffer[R_ACT_ROLL] = activeRollVal_rear;
+    logBuffer[F_ACT_ROLL] = activeRollVal_front;
 
 
 
@@ -799,6 +803,26 @@ int main(void)
                   GNSS_Handle.lon, GNSS_Handle.lat
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+      case 'h':
+          bool run = true;
+          while(run){
+            if(HAL_GetTick() - usbTimeout >= 250){
+              sprintf(msg, "Select Front Anti-Roll Bar Setting (1-9) or QUIT (Q)");
+              CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          
+              if(usbBuffer[0] == 'Q'){
+                run = false;
+                usbBuffer[0] = '?';
+              } 
+
+              if(usbBuffer[0] >= '1' && usbBuffer <= '9'){
+                activeRollVal_front = usbBuffer[0] - '0';
+                usbBuffer[0] = '?';
+              }
+            }
+          }
+          break;
+          
           break;
       case 'i':
           sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
@@ -808,7 +832,7 @@ int main(void)
           bool run = true;
           while(run){
             if(HAL_GetTick() - usbTimeout >= 250){
-              sprintf(msg, "Select Anti-Roll Bar Setting (1-9) or QUIT (Q)");
+              sprintf(msg, "Select Rear Anti-Roll Bar Setting (1-9) or QUIT (Q)");
               CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           
               if(usbBuffer[0] == 'Q'){
@@ -817,7 +841,7 @@ int main(void)
               } 
 
               if(usbBuffer[0] >= '1' && usbBuffer <= '9'){
-                activeRollVal = usbBuffer[0] - '0';
+                activeRollVal_rear = usbBuffer[0] - '0';
                 usbBuffer[0] = '?';
               }
             }
