@@ -32,8 +32,8 @@
 #include "ina260.h"
 #include "eeprom.h"
 #include "logger.h"
+#include "dtc.h"
 #include "stdbool.h"
-
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -77,51 +77,134 @@ uint8_t rtext[_MAX_SS];/* File read buffer */
 uint8_t usbBuffer[64];
 //GNSS_StateHandle gps;
 
+//Stores the Date and Time of the Latest Compile (21 Bytes)
+const char compileDateTime[] = __DATE__ " " __TIME__;
+
+
+// Define your channels using a macro, including some entries with integers at the end
+#define LOG_CHANNELS \
+    X(TS) \
+    X(TS1) \
+    X(TS2) \
+    X(TS3) \
+    X(F_BRAKEPRESSURE) \
+    X(F_BRAKEPRESSURE1) \
+    X(R_BRAKEPRESSURE) \
+    X(R_BRAKEPRESSURE1) \
+    X(STEERING) \
+    X(STEERING1) \
+    X(FLSHOCK) \
+    X(FLSHOCK1) \
+    X(FRSHOCK) \
+    X(FRSHOCK1) \
+    X(RRSHOCK) \
+    X(RRSHOCK1) \
+    X(RLSHOCK) \
+    X(RLSHOCK1) \
+    X(CURRENT) \
+    X(CURRENT1) \
+    X(BATTERY) \
+    X(BATTERY1) \
+    X(IMU_X_ACCEL) \
+    X(IMU_X_ACCEL1) \
+    X(IMU_X_ACCEL2) \
+    X(IMU_X_ACCEL3) \
+    X(IMU_Y_ACCEL) \
+    X(IMU_Y_ACCEL1) \
+    X(IMU_Y_ACCEL2) \
+    X(IMU_Y_ACCEL3) \
+    X(IMU_Z_ACCEL) \
+    X(IMU_Z_ACCEL1) \
+    X(IMU_Z_ACCEL2) \
+    X(IMU_Z_ACCEL3) \
+    X(IMU_X_GYRO) \
+    X(IMU_X_GYRO1) \
+    X(IMU_X_GYRO2) \
+    X(IMU_X_GYRO3) \
+    X(IMU_Y_GYRO) \
+    X(IMU_Y_GYRO1) \
+    X(IMU_Y_GYRO2) \
+    X(IMU_Y_GYRO3) \
+    X(IMU_Z_GYRO) \
+    X(IMU_Z_GYRO1) \
+    X(IMU_Z_GYRO2) \
+    X(IMU_Z_GYRO3) \
+    X(FR_SG) \
+    X(FR_SG1) \
+    X(FL_SG) \
+    X(FL_SG1) \
+    X(RL_SG) \
+    X(RL_SG1) \
+    X(RR_SG) \
+    X(RR_SG1) \
+    X(FLW_AMB) \
+    X(FLW_AMB1) \
+    X(FLW_OBJ) \
+    X(FLW_OBJ1) \
+    X(FLW_RPM) \
+    X(FLW_RPM1) \
+    X(FRW_AMB) \
+    X(FRW_AMB1) \
+    X(FRW_OBJ) \
+    X(FRW_OBJ1) \
+    X(FRW_RPM) \
+    X(FRW_RPM1) \
+    X(RRW_AMB) \
+    X(RRW_AMB1) \
+    X(RRW_OBJ) \
+    X(RRW_OBJ1) \
+    X(RRW_RPM) \
+    X(RRW_RPM1) \
+    X(RLW_AMB) \
+    X(RLW_AMB1) \
+    X(RLW_OBJ) \
+    X(RLW_OBJ1) \
+    X(RLW_RPM) \
+    X(RLW_RPM1) \
+    X(BRAKE_FLUID) \
+    X(BRAKE_FLUID1) \
+    X(THROTTLE_LOAD) \
+    X(THROTTLE_LOAD1) \
+    X(BRAKE_LOAD) \
+    X(BRAKE_LOAD1) \
+    X(DRS) \
+    X(GPS_LON) \
+    X(GPS_LON1) \
+    X(GPS_LON2) \
+    X(GPS_LON3) \
+    X(GPS_LAT) \
+    X(GPS_LAT1) \
+    X(GPS_LAT2) \
+    X(GPS_LAT3) \
+    X(GPS_SPD) \
+    X(GPS_SPD1) \
+    X(GPS_SPD2) \
+    X(GPS_SPD3) \
+    X(GPS_FIX) \
+    X(TESTNO) \
+    X(DTC_FLW) \
+    X(DTC_FRW) \
+    X(DTC_RLW) \
+    X(DTC_RRW) \
+    X(DTC_FLSG) \
+    X(DTC_FRSG) \
+    X(DTC_RLSG) \
+    X(DTC_RRSG) \
+    X(DTC_IMU) \
+    X(GPS_0_) \
+    X(GPS_1_) \
+    X(CH_COUNT)
+
+// Helper macros to detect if a name contains a digit at the end
+#define IS_DIGIT_END(str) (isdigit((unsigned char)__builtin_strrchr(str, '\0')[-1]))
+
 
 enum LogChannel {
-	TS, TS1, TS2, TS3, // timestamp (ms)
-	F_BRAKEPRESSURE, F_BRAKEPRESSURE1, // front brake pressure
-	R_BRAKEPRESSURE, R_BRAKEPRESSURE1, // rear brake pressure
-	STEERING, STEERING1, // steering pot
-	FLSHOCK, FLSHOCK1,
-	FRSHOCK, FRSHOCK1,
-	RRSHOCK, RRSHOCK1,
-	RLSHOCK, RLSHOCK1,
-	CURRENT, CURRENT1,
-	BATTERY, BATTERY1,
-	IMU_X_ACCEL, IMU_X_ACCEL1, IMU_X_ACCEL2, IMU_X_ACCEL3, // mG
-	IMU_Y_ACCEL, IMU_Y_ACCEL1, IMU_Y_ACCEL2, IMU_Y_ACCEL3,
-	IMU_Z_ACCEL, IMU_Z_ACCEL1, IMU_Z_ACCEL2, IMU_Z_ACCEL3,
-	IMU_X_GYRO, IMU_X_GYRO1, IMU_X_GYRO2, IMU_X_GYRO3, // mdps
-	IMU_Y_GYRO, IMU_Y_GYRO1, IMU_Y_GYRO2, IMU_Y_GYRO3,
-	IMU_Z_GYRO, IMU_Z_GYRO1, IMU_Z_GYRO2, IMU_Z_GYRO3,
-	FR_SG, FR_SG1, // 16 bit adc
-	FL_SG, FL_SG1,
-	RL_SG, RL_SG1,
-	RR_SG, RR_SG1,
-	FLW_AMB, FLW_AMB1,
-	FLW_OBJ, FLW_OBJ1,
-	FLW_RPM, FLW_RPM1,
-	FRW_AMB, FRW_AMB1,
-	FRW_OBJ, FRW_OBJ1,
-	FRW_RPM, FRW_RPM1,
-	RRW_AMB, RRW_AMB1,
-	RRW_OBJ, RRW_OBJ1,
-	RRW_RPM, RRW_RPM1,
-	RLW_AMB, RLW_AMB1,
-	RLW_OBJ, RLW_OBJ1,
-	RLW_RPM, RLW_RPM1,
-	BRAKE_FLUID, BRAKE_FLUID1,
-	THROTTLE_LOAD, THROTTLE_LOAD1,
-	BRAKE_LOAD, BRAKE_LOAD1,
-	DRS,
-	GPS_LON, GPS_LON1, GPS_LON2, GPS_LON3,
-	GPS_LAT, GPS_LAT1, GPS_LAT2, GPS_LAT3,
-	GPS_SPD, GPS_SPD1, GPS_SPD2, GPS_SPD3,
-	GPS_FIX,
-	TESTNO,
-	CH_COUNT
+    #define X(channel) channel,
+    LOG_CHANNELS
+    #undef X
 };
+
 
 uint8_t logBuffer[CH_COUNT];
 
@@ -139,6 +222,7 @@ static void MX_UART9_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_FDCAN3_Init(void);
 static void MX_FDCAN2_Init(void);
+char *filterLogChannelNames(unsigned int *outLength);
 /* USER CODE BEGIN PFP */
 // calculate temperature in celsius
 float mlx90614(uint16_t temp);
@@ -156,9 +240,12 @@ typedef struct {
 	uint16_t rpm;
 } wheel_data_s_t;
 
+
 FDCAN_RxHeaderTypeDef	RxHeader;
-uint8_t               	RxData[8];
+uint8_t               RxData[8];
+uint8_t               TxData[8];
 volatile uint32_t count = 0;
+volatile uint32_t imuCount = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
 volatile uint32_t xGyro = 0, yGyro = 0, zGyro = 0;
 volatile uint16_t frsg = 0, flsg = 0, rrsg = 0, rlsg = 0;
@@ -167,11 +254,9 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
-float totalBytesReceived = 0;
-uint32_t lastDataRateTimestamp = 0;
-float dataRateMbits = 0.0000000;
-volatile uint8_t canDataBool = 0;
 
+
+ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
 
 void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 {
@@ -186,20 +271,9 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	//Error_Handler();
     }
     // do things with data
-    totalBytesReceived += 8;
+    // totalBytesReceived += 8;
     canFifoFull = 0;
     count += 1;
-
-    if ((HAL_GetTick() - lastDataRateTimestamp >= 1000))//|| (HAL_GetTick() == 5000))
-    {
-        lastDataRateTimestamp = HAL_GetTick();
-
-        // Calculate data rate in Mbits/s if data was received
-        dataRateMbits = ((totalBytesReceived > 0) ? (totalBytesReceived * 8.0) / 1e6 : 0.0);
-        // Reset byte counter for the next period
-        totalBytesReceived = 0;
-    }
-
     if (count > 900000) {
     	count = 0;
     }
@@ -208,53 +282,97 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
     	drs = RxData[0];
     	break;
     case 0x360:
+    //IMU Data
     	xAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	yAccel = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
+      
+      //IMU DTC Check
     	break;
     case 0x361:
+    //IMU Data
     	zAccel = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	xGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
+
+      //IMU DTC Check
     	break;
     case 0x362:
+    //IMU Data
     	yGyro = RxData[0] << 24 | RxData[1] << 16 | RxData[2] << 8 | RxData[3];
     	zGyro = RxData[4] << 24 | RxData[5] << 16 | RxData[6] << 8 | RxData[7];
+      imuCount++;
+
+      //IMU DTC Check
+      if(HAL_GetTick() - imuDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(imuDTC, HAL_GetTick());
     	break;
     case 0x363:
+    	//Front Left Wheel Board
     	flw.rpm = RxData[0] << 8 | RxData[1];
     	flw.objTemp = RxData[2] << 8 | RxData[3];
     	flw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - flwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(flwDTC, HAL_GetTick());
+
     	break;
     case 0x364:
+    	//Front Right Wheel Board
     	frw.rpm = RxData[0] << 8 | RxData[1];
     	frw.objTemp = RxData[2] << 8 | RxData[3];
     	frw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - frwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(frwDTC, HAL_GetTick());
+
     	break;
     case 0x365:
+    	//Rear Right Wheel Board
     	rrw.rpm = RxData[0] << 8 | RxData[1];
     	rrw.objTemp = RxData[2] << 8 | RxData[3];
     	rrw.ambTemp = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - rrwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rrwDTC, HAL_GetTick());
+
     	break;
     case 0x366:
+    	//Rear Left Wheel Board
     	rlw.rpm = RxData[0] << 8 | RxData[1];
     	rlw.objTemp = RxData[2] << 8 | RxData[3];
     	rlw.ambTemp = RxData[4] << 8 | RxData[5];
-    	break;
-    case 0x368:
-    	brakeFluid = RxData[0] << 8 | RxData[1];
-    	throttleLoad = RxData[2] << 8 | RxData[3];
-    	brakeLoad = RxData[4] << 8 | RxData[5];
+
+    	//If statement ensures update runs only at 50Hz
+    	if(HAL_GetTick() - rlwDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlwDTC, HAL_GetTick());
+
     	break;
     case 0x4e2:
+    	//Front Left String Gauge
     	flsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - flsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(flsDTC, HAL_GetTick());
     	break;
     case 0x4e3:
+    	//Front Right String Gauge
     	frsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - frsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(frsDTC, HAL_GetTick());
     	break;
     case 0x4e4:
+    	//Rear Right String Gauge
     	rrsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - rrsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rrsDTC, HAL_GetTick());
     	break;
     case 0x4e5:
+    	//Rear Left String Gauge
     	rlsg = RxData[0] << 8 | RxData[1];
+
+      //String Gauge DTC Check
+      if(HAL_GetTick() - rlsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlsDTC, HAL_GetTick());
     	break;
     }
 
@@ -331,11 +449,16 @@ int main(void)
   /* USER CODE BEGIN 2 */
   BSP_SD_Init();
 
+  //Initialize DTC subsystem
+  DTC_Init(HAL_GetTick());
+
+
   GNSS_Init(&GNSS_Handle, &huart9);
   GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
   GNSS_ParseBuffer(&GNSS_Handle);
-  //GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
+  GNSS_LoadSignalConfig(&GNSS_Handle);
+  // GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -352,47 +475,128 @@ int main(void)
   eepromRead(&hi2c2, runNoAddr, &runNo);
   uint8_t currRunNo = runNo;
 
-  sprintf(name, "data%d.benji", runNo);
+  sprintf(name, "data%d.benji2", runNo);
   if(++runNo == 255) {
 	  runNo = 0;
   }
   eepromWrite(&hi2c2, runNoAddr, &runNo);
 
+  writeBenji2HeaderToFile(name);
+
+  // //Write the Date and Time of the Last Build to the logBuffer
+  // //TODO: Possibly change to store the Build Date and Time in eeprom rather than stored in logBuffer (RAM)
+  // // for(int i=0; i<21; i++){
+  // //   logBuffer[BUILDT+i] = compileDateTime[i];
+  // // }
 
 
-  if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
-  {
-	  FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
-	  if(res != FR_OK)
-	  {
-		  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-		  Error_Handler();
-	  }
-  }
 
-  if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
-  {
-	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
-	  Error_Handler();
-  }
+  // if(f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK)
+  // {
+	//   FRESULT res = FR_OK; //f_mkfs((TCHAR const*) diskPath, FM_ANY, 0, rtext, sizeof(rtext));
+	//   if(res != FR_OK)
+	//   {
+	// 	  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	// 	  Error_Handler();
+	//   }
+  // }
+
+  // if(f_open(&file, (TCHAR const*) name, FA_OPEN_APPEND | FA_WRITE) != FR_OK)
+  // {
+	//   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+	//   Error_Handler();
+  // }
+
+  //   /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+  // /***************************** PROCEED WITH CAUTION ************************************/
+  // unsigned int size_of_benji2_header = 0;
+  // char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+
+  // // Calculate the size of each chunk
+  // unsigned int chunk_size = size_of_benji2_header / 4;
+  // unsigned int remaining_bytes = size_of_benji2_header % 4; // Handle any remaining bytes
+
+  // // Write how long the header string is
+  // if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) == FR_OK) {
+  //     // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  // }
+  // f_sync(&file);
+
+  // // Write out the header string in 4 chunks
+  // for (int i = 0; i < 4; i++) {
+  //     unsigned int current_chunk_size = chunk_size;
+  //     if (i == 3) {
+  //         // Add the remaining bytes to the last chunk
+  //         current_chunk_size += remaining_bytes;
+  //     }
+
+  //     if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) == FR_OK) {
+  //         // HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+  //     }
+  //     f_sync(&file);
+  // }
+
+
+  /******************************* END OF DELIRIUM **************************************/  
 
 
 
   while (1)
   {
+	  //Check the Error State of all the DTC devices at 50 Hz
+	  if(HAL_GetTick() - DTC_PREV_CHECK_TIME >= DTC_CHECK_INTERVAL ){
+		  //Check CAN and ADC Device Response
+		  DTC_Error_All(HAL_GetTick());
+
+
+		  //Check GPS Fix type
+		  if(GNSS_Handle.fixType == 0){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_0);
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+      } 
+		  else if(GNSS_Handle.fixType == 1){
+        SET_DTC(DTC_Error_State, DTC_Index_GPS_1);
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
+      } 
+      else{
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_0);
+        CLEAR_DTC(DTC_Error_State, DTC_Index_GPS_1);
+      }
+
+		  //Update Last Check Time
+		  DTC_PREV_CHECK_TIME = HAL_GetTick();
+	  }
+
+	  //Start Analog Listening
 	  adcEnable();
-	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_FBP));
-	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, eGetAnalog(&hspi4, ADC_RBP));
-	  loggerEmplaceU16(logBuffer, STEERING, eGetAnalog(&hspi4, ADC_STP));
-	  loggerEmplaceU16(logBuffer, FLSHOCK, eGetAnalog(&hspi4, ADC_FLS));
-	  loggerEmplaceU16(logBuffer, FRSHOCK, eGetAnalog(&hspi4, ADC_FRS));
-	  loggerEmplaceU16(logBuffer, RRSHOCK, eGetAnalog(&hspi4, ADC_RRS));
-	  loggerEmplaceU16(logBuffer, RLSHOCK, eGetAnalog(&hspi4, ADC_RLS));
+
+	  //Receive Analog Sensor Data and Store
+	  fBrakePress = eGetAnalog(&hspi4, ADC_FBP);
+	  rBrakePress = eGetAnalog(&hspi4, ADC_RBP);
+	  steer = eGetAnalog(&hspi4, ADC_STP);
+	  flShock = eGetAnalog(&hspi4, ADC_FLS);
+	  frShock = eGetAnalog(&hspi4, ADC_FRS);
+	  rrShock = eGetAnalog(&hspi4, ADC_RRS);
+	  rlShock = eGetAnalog(&hspi4, ADC_RLS);
+
+
+	  //Log Analog Sensor Data
+	  loggerEmplaceU16(logBuffer, F_BRAKEPRESSURE, fBrakePress.value);
+	  loggerEmplaceU16(logBuffer, R_BRAKEPRESSURE, rBrakePress.value);
+	  loggerEmplaceU16(logBuffer, STEERING, steer.value);
+	  loggerEmplaceU16(logBuffer, FLSHOCK, flShock.value);
+	  loggerEmplaceU16(logBuffer, FRSHOCK, frShock.value);
+	  loggerEmplaceU16(logBuffer, RRSHOCK, rrShock.value);
+	  loggerEmplaceU16(logBuffer, RLSHOCK, rlShock.value);
+
+	  //Stop Analog Listening
 	  adcDisable();
 
+	  //Report Battery Current and Voltage
 	  loggerEmplaceU16(logBuffer, CURRENT, getCurrent(&hi2c4));
 	  loggerEmplaceU16(logBuffer, BATTERY, getVoltage(&hi2c4));
 
+	  //Report IMU Data
 	  loggerEmplaceU32(logBuffer, IMU_X_ACCEL, xAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Y_ACCEL, yAccel);
 	  loggerEmplaceU32(logBuffer, IMU_Z_ACCEL, zAccel);
@@ -401,6 +605,7 @@ int main(void)
 	  loggerEmplaceU32(logBuffer, IMU_Y_GYRO, yGyro);
 	  loggerEmplaceU32(logBuffer, IMU_Z_GYRO, zGyro);
 
+	  //Report Wheel Board Sensor Data
 	  loggerEmplaceU16(logBuffer, FLW_AMB, flw.ambTemp);
 	  loggerEmplaceU16(logBuffer, FLW_OBJ, flw.objTemp);
 	  loggerEmplaceU16(logBuffer, FLW_RPM, flw.rpm);
@@ -417,17 +622,36 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, RLW_OBJ, rlw.objTemp);
 	  loggerEmplaceU16(logBuffer, RLW_RPM, rlw.rpm);
 
+	  //Report String Gauge Data
 	  loggerEmplaceU16(logBuffer, FR_SG, frsg);
 	  loggerEmplaceU16(logBuffer, FL_SG, flsg);
 	  loggerEmplaceU16(logBuffer, RR_SG, rrsg);
 	  loggerEmplaceU16(logBuffer, RL_SG, rlsg);
 
+	  //Report Brakes and Throttle
 	  loggerEmplaceU16(logBuffer, BRAKE_FLUID, brakeFluid);
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
+	  //Report DTC Data
+	  logBuffer[DTC_FLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
+	  logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
+	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
+	  logBuffer[GPS_0_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+
+
+
+
+
 	  static uint32_t GPS_Timer = 0;
-	  if ((HAL_GetTick() - GPS_Timer) > 900) {
+	  if ((HAL_GetTick() - GPS_Timer) > 40) {
 		  GNSS_ParseBuffer(&GNSS_Handle);
 		  GNSS_GetPVTData(&GNSS_Handle);
 
@@ -436,107 +660,210 @@ int main(void)
 		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
 		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
 		  GPS_Timer = HAL_GetTick();
+
+      // Convert GNSS_Handle.lon to a byte array
+		  TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
+		  TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
+		  TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
+		  TxData[3] = (uint8_t)(GNSS_Handle.lon);
+
+		  // Convert GNSS_Handle.lat to a byte array
+		  TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
+		  TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
+		  TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
+		  TxData[7] = (uint8_t)(GNSS_Handle.lat);
+
+      CAN2_Send_Tx(0x369, TxData, 8);
+
 	  }
 
-	  logBuffer[DRS] = drs;
+	  // BEGIN TX TEST CODE
+	  static uint32_t YapTimer = 0;
+	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
+		  YapTimer = HAL_GetTick();
+      /*
+      for (int i = 0; i < 8; i++) {
+        TxData[i] = 0x61;
+      }
+ */
+      TxData[0] = 0x01;
+      TxData[1] = 0x02;
+      TxData[2] = 0x03;
+      TxData[3] = 0x04;
+      for(int i=4; i<8; i++) TxData[i] = 0x00;
+  
+      CAN2_Send_Tx(0x2ee, TxData, 4);
+      CAN3_Send_Tx(0x2ee, TxData, 4);
+
+      }
+
+
+
+
+
+	  // END TX TEST CODE
+
+	  logBuffer[DRS] = 101; //drs
 	  logBuffer[TESTNO] = testNo;
+    logBuffer[CH_COUNT] = 101;
 
 	  static uint32_t usbTimeout = 0;
 	  if(HAL_GetTick() - usbTimeout > 250) {
 		  usbTimeout = HAL_GetTick();
 		  adcEnable();
+
+      //THESE CASES ARE IN ALPHABETICAL ORDER, PLEASE DO NOT MESS THIS UP - ALEX
 		  switch(usbBuffer[0]) {
 		  case '0':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 0).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '1':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 1).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '2':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 2).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '3':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 3).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '4':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 4).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '5':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 5).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '6':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 6).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
 		  case '7':
-			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7));
+			  sprintf(msg, "AIN%c: %d\r\n", usbBuffer[0], eGetAnalog(&hspi4, 7).value);
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
 			  break;
-		  case 's':
-			  sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'i':
-			  sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'c':  // CAN diagnostics output
-		      sprintf(msg, "messages: %ld\tfifo full: %d\tfifo level: %ld\tCAN Data Rate: %.4f Mbits/s\r\n",
-		              count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0), dataRateMbits);
-	            CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-	            break;
 		  case 'a':
-			  sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
-					  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
-					  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
-					  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
-					  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
-					  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
-					  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
-					  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
-			  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'w':
-			  sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
-					  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
-					  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
-					  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
-					  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
-					  );
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-		  case 'm':
-			  sprintf(msg, "current file: data%d.benji\ttest no: %d\r\n", currRunNo, testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'p':
-			  sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 't':
-			  testNo++;
-			  sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  usbBuffer[0] = 'm';
-			  break;
-		  case 'g':
-			  sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
-				  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
-				  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
-				  GNSS_Handle.lon, GNSS_Handle.lat
-				  );
-		      CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
-		  case 'b':
-			  sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
-			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
-			  break;
+          sprintf(msg, "FBP: %d\tRBP: %d\tSTP: %d\tFLS: %d\tFRS: %d\tRRS: %d\tRLS: %d\r\n",
+                  logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1],
+                  logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1],
+                  logBuffer[STEERING] << 8 | logBuffer[STEERING1],
+                  logBuffer[FLSHOCK] << 8 | logBuffer[FLSHOCK1],
+                  logBuffer[FRSHOCK] << 8 | logBuffer[FRSHOCK1],
+                  logBuffer[RRSHOCK] << 8 | logBuffer[RRSHOCK1],
+                  logBuffer[RLSHOCK] << 8 | logBuffer[RLSHOCK1]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'b':
+          sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'c':
+          sprintf(msg, "messages: %d\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'd':
+          //DTC Data Return over USB 1/2
+          sprintf(msg, "FLW: %d\tFRW: %d\tRLW: %d\tRRW: %d\tGPS-Fix 0: %d\tGPS-Fix 1: %d\r\n",
+                  logBuffer[DTC_FLW], logBuffer[DTC_FRW], logBuffer[DTC_RLW], logBuffer[DTC_RRW],
+                  logBuffer[GPS_0_], logBuffer[GPS_1_]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'e':
+          //DTC Data Return over USB 2/2
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\r\n",
+                  logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
+                  logBuffer[DTC_IMU]
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'f':
+        sprintf(msg, "RRW Crnt Buffer: %u\tRLW Crnt Buffer: %u\tRRW Avg: %u\tRLW Avg: %u\tRRW Total: %u\tRLW Total: %u\r\n",
+                rrwDTC->timeBuffer[rrwDTC->bufferIndex], rlwDTC->timeBuffer[rlwDTC->bufferIndex], rrwDTC->avgResponse, rlwDTC->avgResponse, rrwDTC->totalTime, rlwDTC->totalTime
+        );
+        CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+        break;
+      case 'g':
+          sprintf(msg, "fix: %d\tDay: %d-%d-%d\tTime: %d:%d:%d\tLon: %ld\tLat: %ld\r\n", GNSS_Handle.fixType,
+                  GNSS_Handle.day, GNSS_Handle.month, GNSS_Handle.year,
+                  GNSS_Handle.hour, GNSS_Handle.min, GNSS_Handle.sec,
+                  GNSS_Handle.lon, GNSS_Handle.lat
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'i':
+          sprintf(msg, "xAccel: %ld\tyAccel: %ld\tzAccel: %ld\r\n", xAccel, yAccel, zAccel);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'k':
+          char result[256];
+          char buffer[50]; // Temporary buffer to hold each integer as a string
+          result[0] = '\0'; // Initialize the result string
+
+          for (int i = 0; i < imuDTC->measures; i++) {
+                sprintf(buffer, "%lu ", imuDTC->timeBuffer[i]);
+                strcat(result, buffer);
+          }
+          
+    	    sprintf(msg, "IMU Buffer: %lu\tIMU BfrIdx: %d\tIMU Avg: %lu\tIMU Total: %lu\tIMU Hz: %lu\tbffr: %s\r\n",
+                  imuDTC->timeBuffer[imuDTC->bufferIndex], imuDTC->bufferIndex, imuDTC->avgResponse, imuDTC->totalTime, 1000 / imuDTC->timeBuffer[imuDTC->bufferIndex], result
+          );
+          CDC_Transmit_HS((uint8_t *) msg, strlen(msg));
+          break;
+      case 'm':
+          sprintf(msg, "current file: %s\ttest no: %d\r\n", name, testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'o':
+          sprintf(msg, "Last Build: %s\r\n", compileDateTime);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 'p':
+          sprintf(msg, "current draw: %.2f mA\tbattery: %.2f V\r\n", ((float) ( (short) getCurrent(&hi2c4) )) * 1.25, ((float) getVoltage(&hi2c4)) * 1.25 / 1000.0);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 's':
+          sprintf(msg, "FL: %d\tFR: %d\tRR: %d\tRL: %d\r\n", flsg, frsg, rrsg, rlsg);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+      case 't':
+          testNo++;
+          sprintf(msg, "incrementing test number! current test: %d\r\n", testNo);
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          usbBuffer[0] = 'm';
+          break;
+      case 'w':
+          sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
+                  mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
+                  mlx90614(frw.objTemp), mlx90614(frw.ambTemp), frw.rpm,
+                  mlx90614(rrw.objTemp), mlx90614(rrw.ambTemp), rrw.rpm,
+                  mlx90614(rlw.objTemp), mlx90614(rlw.ambTemp), rlw.rpm
+          );
+          CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+          break;
+
+       case 'z':
+            f_close(&file);
+            eepromRead(&hi2c2, runNoAddr, &runNo);
+            uint8_t currRunNo = runNo;
+          
+            sprintf(name, "data%d.benji2", runNo);
+            if(++runNo == 255) {
+              runNo = 0;
+            }
+            eepromWrite(&hi2c2, runNoAddr, &runNo);
+          
+            writeBenji2HeaderToFile(name);
+
+           sprintf(msg, "Incrementing Log File!\r\nCurrent Log File: %s\r\n", name);
+           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+           usbBuffer[0] = 'm';
+           break;
 		  default:
 			  sprintf(msg, "no option selected\r\n");
 			  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
@@ -684,9 +1011,9 @@ static void MX_FDCAN2_Init(void)
   hfdcan2.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan2.Init.RxBuffersNbr = 0;
   hfdcan2.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
-  hfdcan2.Init.TxEventsNbr = 0;
-  hfdcan2.Init.TxBuffersNbr = 0;
-  hfdcan2.Init.TxFifoQueueElmtsNbr = 0;
+  hfdcan2.Init.TxEventsNbr = 32;
+  hfdcan2.Init.TxBuffersNbr = 32;
+  hfdcan2.Init.TxFifoQueueElmtsNbr = 32;
   hfdcan2.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan2.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
   if (HAL_FDCAN_Init(&hfdcan2) != HAL_OK)
@@ -694,8 +1021,82 @@ static void MX_FDCAN2_Init(void)
     Error_Handler();
   }
   /* USER CODE BEGIN FDCAN2_Init 2 */
+  HAL_FDCAN_ConfigRxFifoOverwrite(&hfdcan2, FDCAN_RX_FIFO0, FDCAN_RX_FIFO_OVERWRITE);
+  canFilter.IdType = FDCAN_STANDARD_ID;
+  canFilter.FilterIndex = 0;
+  canFilter.FilterType = FDCAN_FILTER_RANGE;
+  canFilter.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
+  // accept all IDs
+  canFilter.FilterID1 = 0x00;
+  canFilter.FilterID2 = 0x7FF;
+  canFilter.RxBufferIndex = 0;
+  HAL_FDCAN_ConfigFilter(&hfdcan2, &canFilter);
 
+  if (HAL_FDCAN_Start(&hfdcan2) != HAL_OK)
+	{
+	  Error_Handler();
+	}
+
+  if (HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0) != HAL_OK)
+  {
+    /* Notification Error */
+    Error_Handler();
+  }
+  HAL_FDCAN_ActivateNotification(&hfdcan2, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN2_Init 2 */
+
+
+
+}
+
+void CAN2_Send_Tx(int id, uint8_t TxData[8], uint8_t length){
+  //TX TEST CONFIG
+  FDCAN_TxHeaderTypeDef   TxHeader;
+
+  char msg[128];
+  if(length > 8){
+    sprintf(msg, "WHOAH! Wayy too much data, you tried to send: %d bytes", length);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+    return;
+  }
+
+  /* Prepare Tx Header */
+  TxHeader.Identifier = id;
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  TxHeader.DataLength = (uint32_t)length << 16;
+  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  TxHeader.MessageMarker = 0x00;
+
+  
+  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan2, &TxHeader, TxData) != HAL_OK)
+  {
+        uint32_t errorCode = HAL_FDCAN_GetError(&hfdcan2);
+        switch (errorCode) {
+            case HAL_FDCAN_ERROR_PARAM:
+                sprintf(msg, "hey, my error code is: ERROR PARAM (0x20)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_EP:
+                sprintf(msg, "hey, my error code is: ERROR PASSIVE (0x10)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_BO:
+                sprintf(msg, "hey, my error code is: BUS OFF (0x40)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              default:
+                sprintf(msg, "hey, my error code is: %lu\r\n", errorCode);
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));// Fallback to numeric
+                break;// Use %lu for uint32_t
+
+        }
+              // Optional: handle other errors differently or log them
+  }
+
 
 }
 
@@ -737,9 +1138,9 @@ static void MX_FDCAN3_Init(void)
   hfdcan3.Init.RxFifo1ElmtSize = FDCAN_DATA_BYTES_8;
   hfdcan3.Init.RxBuffersNbr = 0;
   hfdcan3.Init.RxBufferSize = FDCAN_DATA_BYTES_8;
-  hfdcan3.Init.TxEventsNbr = 0;
-  hfdcan3.Init.TxBuffersNbr = 0;
-  hfdcan3.Init.TxFifoQueueElmtsNbr = 0;
+  hfdcan3.Init.TxEventsNbr = 32;
+  hfdcan3.Init.TxBuffersNbr = 32;
+  hfdcan3.Init.TxFifoQueueElmtsNbr = 32;
   hfdcan3.Init.TxFifoQueueMode = FDCAN_TX_FIFO_OPERATION;
   hfdcan3.Init.TxElmtSize = FDCAN_DATA_BYTES_8;
   if (HAL_FDCAN_Init(&hfdcan3) != HAL_OK)
@@ -771,6 +1172,57 @@ static void MX_FDCAN3_Init(void)
   }
   HAL_FDCAN_ActivateNotification(&hfdcan3, FDCAN_IT_RX_FIFO0_FULL, 0);
   /* USER CODE END FDCAN3_Init 2 */
+
+}
+
+void CAN3_Send_Tx(int id, uint8_t TxData[8], uint8_t length){
+  //TX TEST CONFIG
+  FDCAN_TxHeaderTypeDef   TxHeader;
+
+  char msg[128];
+  if(length > 8){
+    sprintf(msg, "WHOAH! Wayy too much data, you tried to send: %d bytes", length);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+    return;
+  }
+
+  /* Prepare Tx Header */
+  TxHeader.Identifier = id;
+  TxHeader.IdType = FDCAN_STANDARD_ID;
+  TxHeader.TxFrameType = FDCAN_DATA_FRAME;
+  TxHeader.DataLength = (uint32_t)length << 16;
+  TxHeader.ErrorStateIndicator = FDCAN_ESI_ACTIVE;
+  TxHeader.BitRateSwitch = FDCAN_BRS_OFF;
+  TxHeader.FDFormat = FDCAN_CLASSIC_CAN;
+  TxHeader.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
+  TxHeader.MessageMarker = 0x00;
+
+  
+  if (HAL_FDCAN_AddMessageToTxFifoQ(&hfdcan3, &TxHeader, TxData) != HAL_OK)
+  {
+        uint32_t errorCode = HAL_FDCAN_GetError(&hfdcan3);
+        switch (errorCode) {
+            case HAL_FDCAN_ERROR_PARAM:
+                sprintf(msg, "hey, my error code is: ERROR PARAM (0x20)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_EP:
+                sprintf(msg, "hey, my error code is: ERROR PASSIVE (0x10)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              case FDCAN_IR_BO:
+                sprintf(msg, "hey, my error code is: BUS OFF (0x40)\r\n");
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+                break;
+              default:
+                sprintf(msg, "hey, my error code is: %lu\r\n", errorCode);
+                CDC_Transmit_HS((uint8_t*) msg, strlen(msg));// Fallback to numeric
+                break;// Use %lu for uint32_t
+
+        }
+              // Optional: handle other errors differently or log them
+  }
+
 
 }
 
@@ -1062,6 +1514,14 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_FDCAN_ErrorCallback(FDCAN_HandleTypeDef *hfdcan)
+{
+    char msg[50];
+    uint32_t errorCode = HAL_FDCAN_GetError(hfdcan);
+    sprintf(msg, "Error Code: 0x%lx\r\n", errorCode);
+    CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+}
+
 
 /* USER CODE END 4 */
 
@@ -1078,6 +1538,102 @@ void Error_Handler(void)
   {
   }
   /* USER CODE END Error_Handler_Debug */
+}
+
+// Function to filter strings that do not end with a digit and return a formatted string
+char *filterLogChannelNames(unsigned int *outLength) {
+    char *outputList[] = {
+        #define X(channel) {#channel ","}, //{IS_DIGIT_END(#channel) ? NULL : #channel ","}
+            LOG_CHANNELS
+        #undef X
+
+    };
+    size_t output_size = sizeof(outputList) / sizeof(char *);
+    // for(int i = output_size - 1; i >= 0; i--){
+    //     if(outputList[i] == NULL) output_size--;
+    //     else break;
+    // }
+
+
+    // Allocate maximum size of output string and initialize it to an empty string
+    char *tempOutStr = malloc(output_size * sizeof(char *));
+    if (tempOutStr == NULL) {
+        return NULL;
+    }
+    tempOutStr[0] = '\0'; // Initialize the first character to null terminator
+
+
+    for(int i=0; i<output_size; i++){
+        if(outputList[i]){
+            if(i<output_size-1)
+                strcat(tempOutStr, outputList[i]);
+            else{
+                char temp[strlen(outputList[i])];
+                strcpy(temp, outputList[i]);
+                temp[strlen(temp) - 1] = '\0';
+                strcat(tempOutStr, temp);
+            }
+        }
+    }
+
+    
+    *outLength = (unsigned int)strlen(tempOutStr) + 3;
+
+    
+    return tempOutStr;
+}
+
+
+void writeBenji2HeaderToFile(const char *filename) {
+    UINT wbytes; // Variable to hold number of bytes written
+
+    // Mount the filesystem using the global diskPath and fatFS
+    if (f_mount(&fatFS, (TCHAR const*) diskPath, 0) == FR_OK) {
+        FRESULT res = FR_OK; // If needed, a formatting call (e.g., f_mkfs) would be added here.
+        if (res != FR_OK) {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+            Error_Handler();
+        }
+    }
+
+    // Open the file (using the filename parameter) for appending and writing
+    if (f_open(&file, (TCHAR const*) filename, FA_OPEN_APPEND | FA_WRITE) != FR_OK) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+        Error_Handler();
+    }
+
+    /*** WARNING!! THE FOLLOWING SECTION WAS WRITTEN WHILE ALEX WAS DELIRIOUS FROM FEVER ***/
+    /***************************** PROCEED WITH CAUTION ************************************/
+    unsigned int size_of_benji2_header = 0;
+    char *benji2_log_header = filterLogChannelNames(&size_of_benji2_header);
+
+    // Calculate the size of each chunk and handle any remaining bytes
+    unsigned int chunk_size = size_of_benji2_header / 4;
+    unsigned int remaining_bytes = size_of_benji2_header % 4;
+
+    // Write how long the header string is to the file
+    if (f_write(&file, &size_of_benji2_header, sizeof(unsigned int), &wbytes) != FR_OK) {
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+        Error_Handler();
+    }
+    f_sync(&file);
+
+    // Write out the header string in 4 chunks
+    for (int i = 0; i < 4; i++) {
+        unsigned int current_chunk_size = chunk_size;
+        if (i == 3) {
+            // Add any remaining bytes to the last chunk
+            current_chunk_size += remaining_bytes;
+        }
+        if (f_write(&file, benji2_log_header + (i * chunk_size), current_chunk_size, &wbytes) != FR_OK) {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_RESET);
+            Error_Handler();
+        }
+        f_sync(&file);
+    }
+
+    // Free the header string allocated by filterLogChannelNames
+    free(benji2_log_header);
 }
 
 #ifdef  USE_FULL_ASSERT
