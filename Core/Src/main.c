@@ -181,6 +181,13 @@ const char compileDateTime[] = __DATE__ " " __TIME__;
     X(GPS_SPD2) \
     X(GPS_SPD3) \
     X(GPS_FIX) \
+    X(ECT) \
+    X(OIL_PSR) \ 
+    X(OIL_PSR1) \ 
+    X(TPS) \
+    X(APS) \
+    X(DRIVEN_WSPD) \
+    X(DRIVEN_WSPD1) \
     X(TESTNO) \
     X(DTC_FLW) \
     X(DTC_FRW) \
@@ -254,6 +261,8 @@ volatile uint8_t testNo = 0;
 volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
+volatile uint16_t oilPress = 0, driven_wspd = 0;
+volatile uint8_t ect = 0, tps = 0, aps = 0;
 
 
 ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
@@ -374,6 +383,28 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       //String Gauge DTC Check
       if(HAL_GetTick() - rlsDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(rlsDTC, HAL_GetTick());
     	break;
+    
+    case 0x3e8:
+      //Engine CAN Stream 2
+      switch(RxData[0]){
+        //Frame 1
+        case 0x0:
+          // engine_speed = RxData[1] << 8 | RxData[2];
+          ect = RxData[3];
+          // oilTemp = RxData[4];
+          oilPress = RxData[5] << 8 | RxData[6];
+          //TODO: Could also add Park/Neutral Status (Stored on RxData[7])
+          break;
+
+        case 0x1:
+          tps = RxData[2];
+          driven_wspd = RxData[4] << 8 | RxData[5];
+          break;
+        
+        case 0x2:
+          aps = RxData[1];
+      }
+      break;
     }
 
 
@@ -633,6 +664,13 @@ int main(void)
 	  loggerEmplaceU16(logBuffer, THROTTLE_LOAD, throttleLoad);
 	  loggerEmplaceU16(logBuffer, BRAKE_LOAD, brakeLoad);
 
+    //Report ECU Data
+    loggerEmplaceU16(logBuffer, DRIVEN_WSPD, driven_wspd);
+    loggerEmplaceU16(logBuffer, OIL_PSR, oilPress);
+    logBuffer[TPS] = tps;
+    logBuffer[ECT] = ect;
+    logBuffer[APS] = aps;
+
 	  //Report DTC Data
 	  logBuffer[DTC_FLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
 	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
@@ -643,8 +681,8 @@ int main(void)
 	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
 	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
 	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
-	  logBuffer[GPS_0_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
-	  logBuffer[GPS_1_]    = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+	  logBuffer[GPS_0_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
 
 
 
@@ -847,7 +885,13 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
 
-       case 'z':
+      case 'x':
+          sprintf(msg, "Coolant Temp: %d\tOil Pressure: %d\tDriven Wspd: %d\tTPS: %d\tAPS: %d\tTPS/APS diff: %d\r\n",
+                  ect, oilPress, driven_wspd, tps, aps, tps-aps);
+          CDC_Transmit_HS((uint8_t *)msg, strlen(msg));
+          break;
+
+      case 'z':
             f_close(&file);
             eepromRead(&hi2c2, runNoAddr, &runNo);
             uint8_t currRunNo = runNo;
