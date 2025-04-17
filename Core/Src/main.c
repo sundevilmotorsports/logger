@@ -488,7 +488,7 @@ int main(void)
   GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
   GNSS_ParseBuffer(&GNSS_Handle);
-  GNSS_LoadSignalConfig(&GNSS_Handle);
+  //GNSS_LoadSignalConfig(&GNSS_Handle);
   // GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
 
