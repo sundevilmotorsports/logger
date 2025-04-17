@@ -488,7 +488,7 @@ int main(void)
   GNSS_GetUniqID(&GNSS_Handle);
   HAL_Delay(1000);
   GNSS_ParseBuffer(&GNSS_Handle);
-  //GNSS_LoadSignalConfig(&GNSS_Handle);
+  GNSS_LoadSignalConfig(&GNSS_Handle);
   // GNSS_LoadConfig(&GNSS_Handle); // DO NOT LOAD CONFIG IT WILL BREAK GPS
   /* USER CODE END 2 */
 
@@ -689,7 +689,7 @@ int main(void)
 
 
 	  static uint32_t GPS_Timer = 0;
-	  if ((HAL_GetTick() - GPS_Timer) > 40) {
+	  if ((HAL_GetTick() - GPS_Timer) > 160) {
 		  GNSS_ParseBuffer(&GNSS_Handle);
 		  GNSS_GetPVTData(&GNSS_Handle);
 
