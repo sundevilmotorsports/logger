@@ -495,7 +495,7 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   char msg[128];
-  char name[16];
+  char name[32];
 
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12, GPIO_PIN_SET);
 
@@ -504,9 +504,13 @@ int main(void)
   uint8_t runNo = 0;
   uint16_t runNoAddr = 4;
   eepromRead(&hi2c2, runNoAddr, &runNo);
+  uint8_t modelNo = 0;
+  uint16_t modelNoAddr = 5;
+  //eepromWrite(&hi2c2, modelNoAddr, &modelNo);
+  eepromRead(&hi2c2, modelNoAddr, &modelNo);
   uint8_t currRunNo = runNo;
 
-  sprintf(name, "data%d.benji2", runNo);
+  sprintf(name, "data%d_%d.benji2", modelNo, runNo);
   if(++runNo == 255) {
 	  runNo = 0;
   }
@@ -895,8 +899,10 @@ int main(void)
             f_close(&file);
             eepromRead(&hi2c2, runNoAddr, &runNo);
             uint8_t currRunNo = runNo;
+
+            eepromRead(&hi2c2, modelNoAddr, &modelNo);
           
-            sprintf(name, "data%d.benji2", runNo);
+            sprintf(name, "data%d_%d.benji2", modelNo, runNo);
             if(++runNo == 255) {
               runNo = 0;
             }
