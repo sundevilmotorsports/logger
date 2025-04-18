@@ -76,6 +76,9 @@ void GNSS_ParseBuffer(GNSS_StateHandle *GNSS) {
 			} else if (GNSS->uartWorkingBuffer[var + 2] == 0x01 && GNSS->uartWorkingBuffer[var + 3] == 0x02) { // Look at: 32.17.15.1 u-blox 8 Receiver description
 				GNSS_ParsePOSLLHData(GNSS);
 			}
+			// else if(GNSS->uartWorkingBuffer[var + 2] == 0x05 && GNSS->uartWorkingBuffer[var + 3] == 0x00){
+			// 	//UBX Not Acknowledged Message
+			// }
 		}
 	}
 }
