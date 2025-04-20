@@ -510,6 +510,11 @@ int main(void)
   eepromRead(&hi2c2, modelNoAddr, &modelNo);
   uint8_t currRunNo = runNo;
 
+
+  float fbpress = 0;
+  float rbpress = 0;
+  float brakebias = 0;
+
   sprintf(name, "data%d_%d.benji2", modelNo, runNo);
   if(++runNo == 255) {
 	  runNo = 0;
@@ -739,6 +744,10 @@ int main(void)
 
       }
 
+	  float fbpress = ((float)((logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1]) - 400) / 3600.0f) * 1000.0f;
+	  float rbpress = ((float)((logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1]) - 400) / 3600.0f) * 1000.0f;
+
+	  float brakebias = (fbpress / (rbpress+fbpress) )  * 100.0f;
 
 
 
@@ -747,7 +756,7 @@ int main(void)
 
 	  logBuffer[DRS] = 101; //drs
 	  logBuffer[TESTNO] = testNo;
-    logBuffer[CH_COUNT] = 101;
+	  logBuffer[CH_COUNT] = 101;
 
 	  static uint32_t usbTimeout = 0;
 	  if(HAL_GetTick() - usbTimeout > 250) {
@@ -801,7 +810,7 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'b':
-          sprintf(msg, "brake fluid temperature: %d\r\n", brakeFluid);
+          sprintf(msg, "brake bias estimation: %.1f\tEst. F Pressure (psi): %.1f\tEst. R Pressure (psi): %.1f\r\n", brakebias, fbpress, rbpress);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'c':
