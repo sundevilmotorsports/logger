@@ -236,6 +236,7 @@ float mlx90614(uint16_t temp);
 float mlx90614(uint16_t temp) {
 	return (((float) temp * 0.02) - 273.15);
 }
+void CAN2_Send_Tx(int id, uint8_t TxData[8], uint8_t length);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -251,6 +252,7 @@ typedef struct {
 FDCAN_RxHeaderTypeDef	RxHeader;
 uint8_t               RxData[8];
 uint8_t               TxData[8];
+uint8_t				  TXDAT[8];
 volatile uint32_t count = 0;
 volatile uint32_t imuCount = 0;
 volatile uint32_t xAccel = 0, yAccel = 0, zAccel = 0;
@@ -262,7 +264,7 @@ volatile uint8_t canFifoFull = 0;
 volatile uint8_t drs = 0;
 volatile uint16_t brakeFluid = 0, throttleLoad = 0, brakeLoad = 0;
 volatile uint16_t oilPress = 0, driven_wspd = 0;
-volatile uint8_t ect = 0, tps = 0, aps = 0;
+volatile uint8_t ect = 0, tps = 0, aps = 0, shift0 = 0, shift1 = 0, shift2 = 0;
 
 
 ADC_Result fBrakePress, rBrakePress, steer, flShock, frShock, rrShock, rlShock;
@@ -405,6 +407,17 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
           aps = RxData[1];
       }
       break;
+
+    case 0x40:
+      		  shift0 = RxData[0];
+      	  	  shift1 = RxData[1];
+      	  	  shift2 = RxData[2];
+      	  	  if((shift1 != 1) | (shift2 != 1)) {
+      	  		  TXDAT[1] = shift1;
+      	  		  TXDAT[2] = shift2;
+
+      	  	  }
+    break;
     }
 
 
@@ -693,56 +706,69 @@ int main(void)
 	  logBuffer[GPS_0_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
 	  logBuffer[GPS_1_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
 
+//
+//	  static uint32_t GPS_Timer = 0;
+//	  if ((HAL_GetTick() - GPS_Timer) > 160) {
+//		  GNSS_ParseBuffer(&GNSS_Handle);
+//		  GNSS_GetPVTData(&GNSS_Handle);
+//
+//		  loggerEmplaceU32(logBuffer, GPS_LON, GNSS_Handle.lon);
+//		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
+//		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
+//		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
+//		  GPS_Timer = HAL_GetTick();
+//
+//      // Convert GNSS_Handle.lon to a byte array
+//		  TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
+//		  TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
+//		  TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
+//		  TxData[3] = (uint8_t)(GNSS_Handle.lon);
+//
+//		  // Convert GNSS_Handle.lat to a byte array
+//		  TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
+//		  TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
+//		  TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
+//		  TxData[7] = (uint8_t)(GNSS_Handle.lat);
+//
+//      CAN2_Send_Tx(0x369, TxData, 8);
+//
+//	  }
+//
+	  static uint32_t shiftR_Timer = 0;
+	  if ((HAL_GetTick() - shiftR_Timer) > 50) {
 
+		  shiftR_Timer = HAL_GetTick();
+		  TxData[0] = 0;
+		  TxData[1] = TXDAT[1];
+		  TxData[2] = TXDAT[2];
+		  TxData[3] = 0x00;
+      CAN2_Send_Tx(0x410, TxData, 4);
+      CAN3_Send_Tx(0x410, TxData, 4);
 
-
-
-	  static uint32_t GPS_Timer = 0;
-	  if ((HAL_GetTick() - GPS_Timer) > 160) {
-		  GNSS_ParseBuffer(&GNSS_Handle);
-		  GNSS_GetPVTData(&GNSS_Handle);
-
-		  loggerEmplaceU32(logBuffer, GPS_LON, GNSS_Handle.lon);
-		  loggerEmplaceU32(logBuffer, GPS_LAT, GNSS_Handle.lat);
-		  loggerEmplaceU32(logBuffer, GPS_SPD, GNSS_Handle.gSpeed);
-		  logBuffer[GPS_FIX] = GNSS_Handle.fixType;
-		  GPS_Timer = HAL_GetTick();
-
-      // Convert GNSS_Handle.lon to a byte array
-		  TxData[0] = (uint8_t)(GNSS_Handle.lon >> 24);
-		  TxData[1] = (uint8_t)(GNSS_Handle.lon >> 16);
-		  TxData[2] = (uint8_t)(GNSS_Handle.lon >> 8);
-		  TxData[3] = (uint8_t)(GNSS_Handle.lon);
-
-		  // Convert GNSS_Handle.lat to a byte array
-		  TxData[4] = (uint8_t)(GNSS_Handle.lat >> 24);
-		  TxData[5] = (uint8_t)(GNSS_Handle.lat >> 16);
-		  TxData[6] = (uint8_t)(GNSS_Handle.lat >> 8);
-		  TxData[7] = (uint8_t)(GNSS_Handle.lat);
-
-      CAN2_Send_Tx(0x369, TxData, 8);
+      TXDAT[1] = 0;
+      TXDAT[2] = 0;
 
 	  }
 
 	  // BEGIN TX TEST CODE
-	  static uint32_t YapTimer = 0;
-	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
-		  YapTimer = HAL_GetTick();
-      /*
-      for (int i = 0; i < 8; i++) {
-        TxData[i] = 0x61;
-      }
- */
-      TxData[0] = 0x01;
-      TxData[1] = 0x02;
-      TxData[2] = 0x03;
-      TxData[3] = 0x04;
-      for(int i=4; i<8; i++) TxData[i] = 0x00;
-  
-      CAN2_Send_Tx(0x2ee, TxData, 4);
-      CAN3_Send_Tx(0x2ee, TxData, 4);
-
-      }
+//	  static uint32_t YapTimer = 0;
+//	  if ((HAL_GetTick() - YapTimer) > 40) { // 40ms -> 25hz for starters
+//		  YapTimer = HAL_GetTick();`
+//      /*
+//      for (int i = 0; i < 8; i++) {
+//        TxData[i] = 0x61;
+//      }
+// */
+//      TxData[0] = 0x01;
+//      TxData[1] = 0x02;
+//      TxData[2] = 0x03;
+//      TxData[3] = 0x04;
+//      for(int i=4; i<8; i++) TxData[i] = 0x00;
+//
+//      CAN2_Send_Tx(0x2ee, TxData, 4);
+//      CAN3_Send_Tx(0x2ee, TxData, 4);
+//
+//      }
 
 	  float fbpress = ((float)((logBuffer[F_BRAKEPRESSURE] << 8 | logBuffer[F_BRAKEPRESSURE1]) - 400) / 3600.0f) * 1000.0f;
 	  float rbpress = ((float)((logBuffer[R_BRAKEPRESSURE] << 8 | logBuffer[R_BRAKEPRESSURE1]) - 400) / 3600.0f) * 1000.0f;
@@ -814,7 +840,7 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'c':
-          sprintf(msg, "messages: %d\tfifo full: %d\tfifo level: %ld\r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0));
+          sprintf(msg, "messages: %d\tfifo full: %d\tfifo level: %ld \tgoofy shifter shit: %d %d %d \r\n", count, canFifoFull, HAL_FDCAN_GetRxFifoFillLevel(&hfdcan3, FDCAN_RX_FIFO0),shift0, TXDAT[1], TXDAT[2]);
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
       case 'd':
@@ -888,6 +914,11 @@ int main(void)
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           usbBuffer[0] = 'm';
           break;
+
+      case 'v':
+    	  sprintf(msg, "RL WSPD: %d \tRR WSPD: %d \t Driven: %d \t\r\n",rlw.rpm, rrw.rpm, driven_wspd);
+    	  CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
+    	  break;
       case 'w':
           sprintf(msg, "(rtr/amb/rpm)\tFL: %.2f/%.2f/%d\tFR: %.2f/%.2f/%d\tRR: %.2f/%.2f/%d\tRL: %.2f/%.2f/%d\r\n",
                   mlx90614(flw.objTemp), mlx90614(flw.ambTemp), flw.rpm,
