@@ -198,6 +198,7 @@ const char compileDateTime[] = __DATE__ " " __TIME__;
     X(DTC_RLSG) \
     X(DTC_RRSG) \
     X(DTC_IMU) \
+    X(DTC_SHIFTER) \
     X(GPS_0_) \
     X(GPS_1_) \
     X(CH_COUNT)
@@ -697,17 +698,18 @@ int main(void)
     logBuffer[APS] = aps;
 
 	  //Report DTC Data
-	  logBuffer[DTC_FLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
-	  logBuffer[DTC_FRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
-	  logBuffer[DTC_RRW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
-	  logBuffer[DTC_RLW]  = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
-	  logBuffer[DTC_FLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
-	  logBuffer[DTC_FRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
-	  logBuffer[DTC_RLSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
-	  logBuffer[DTC_RRSG] = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
-	  logBuffer[DTC_IMU]  = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
-	  logBuffer[GPS_0_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
-	  logBuffer[GPS_1_]   = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+	  logBuffer[DTC_FLW]     = CHECK_DTC(DTC_Error_State, DTC_Index_flWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FRW]     = CHECK_DTC(DTC_Error_State, DTC_Index_frWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RRW]     = CHECK_DTC(DTC_Error_State, DTC_Index_rrWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_RLW]     = CHECK_DTC(DTC_Error_State, DTC_Index_rlWheelBoard) ? 1 : 0;
+	  logBuffer[DTC_FLSG]    = CHECK_DTC(DTC_Error_State, DTC_Index_flStringGauge) ? 1 : 0;
+	  logBuffer[DTC_FRSG]    = CHECK_DTC(DTC_Error_State, DTC_Index_frStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RLSG]    = CHECK_DTC(DTC_Error_State, DTC_Index_rlStringGauge) ? 1 : 0;
+	  logBuffer[DTC_RRSG]    = CHECK_DTC(DTC_Error_State, DTC_Index_rrStringGauge) ? 1 : 0;
+	  logBuffer[DTC_IMU]     = CHECK_DTC(DTC_Error_State, DTC_Index_IMU) ? 1 : 0;
+	  logBuffer[GPS_0_]      = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_0) ? 1 : 0;
+	  logBuffer[GPS_1_]      = CHECK_DTC(DTC_Error_State, DTC_Index_GPS_1) ? 1 : 0;
+    logBuffer[DTC_SHIFTER] = CHECK_DTC(DTC_Error_State, DTC_Index_Shifter) ? 1: 0;
 
 //
 //	  static uint32_t GPS_Timer = 0;
@@ -856,9 +858,9 @@ int main(void)
           break;
       case 'e':
           //DTC Data Return over USB 2/2
-          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\r\n",
+          sprintf(msg, "FLSG: %d\tFRSG: %d\tRLSG: %d\tRRSG: %d\tIMU: %d\tShifter: %d\r\n",
                   logBuffer[DTC_FLSG], logBuffer[DTC_FRSG], logBuffer[DTC_RLSG], logBuffer[DTC_RRSG],
-                  logBuffer[DTC_IMU]
+                  logBuffer[DTC_IMU], logBuffer[DTC_SHIFTER]
           );
           CDC_Transmit_HS((uint8_t*) msg, strlen(msg));
           break;
