@@ -80,21 +80,42 @@ extern can_dtc *imuDTC;
 // Declare pointer to Brake and Throttle DTC Handler
 extern can_dtc *brakeNthrottleDTC;
 
-//CAN Device DTC Indexes
-extern const uint8_t DTC_Index_frWheelBoard;
-extern const uint8_t DTC_Index_flWheelBoard;
-extern const uint8_t DTC_Index_rrWheelBoard;
-extern const uint8_t DTC_Index_rlWheelBoard;
-extern const uint8_t DTC_Index_flStringGauge;
-extern const uint8_t DTC_Index_frStringGauge;
-extern const uint8_t DTC_Index_rlStringGauge;
-extern const uint8_t DTC_Index_rrStringGauge;
-extern const uint8_t DTC_Index_IMU;
-extern const uint8_t DTC_Index_brakeNthrottle;
+extern can_dtc *shifterDTC;
 
-//GPS Device DTC Indexes
-extern const uint8_t DTC_Index_GPS_0;
-extern const uint8_t DTC_Index_GPS_1;
+// DTC Index Enum
+typedef enum {
+    // CAN Device DTC Indexes (0-3)
+    DTC_Index_frWheelBoard,
+    DTC_Index_flWheelBoard,
+    DTC_Index_rrWheelBoard,
+    DTC_Index_rlWheelBoard,
+    
+    // ADC Device DTC Indexes (4-10)
+    DTC_Index_fBrakePress,
+    DTC_Index_rBrakePress,
+    DTC_Index_steer,
+    DTC_Index_flShock,
+    DTC_Index_frShock,
+    DTC_Index_rlShock,
+    DTC_Index_rrShock,
+    
+    // String Gauge DTC Indexes (11-14)
+    DTC_Index_flStringGauge,
+    DTC_Index_frStringGauge,
+    DTC_Index_rlStringGauge,
+    DTC_Index_rrStringGauge,
+    
+    // IMU and Brake/Throttle DTC Indexes (15-16)
+    DTC_Index_IMU,
+    DTC_Index_brakeNthrottle,
+    
+    // GPS Device DTC Indexes (17-18)
+    DTC_Index_GPS_0,
+    DTC_Index_GPS_1,
+    
+    // Shifter DTC Index (19)
+    DTC_Index_Shifter
+} DTC_Index_t;
 
 
 #endif

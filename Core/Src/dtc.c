@@ -6,31 +6,7 @@ uint32_t DTC_PREV_CHECK_TIME = 0;
 
 //******************************************************************* 
 //Defining the DTC Storage Index for each recorded DTC device
-
-//CAN Device DTC Indexes
-const uint8_t DTC_Index_frWheelBoard = 0;
-const uint8_t DTC_Index_flWheelBoard = 1;
-const uint8_t DTC_Index_rrWheelBoard = 2;
-const uint8_t DTC_Index_rlWheelBoard = 3;
-const uint8_t DTC_Index_flStringGauge = 11;
-const uint8_t DTC_Index_frStringGauge = 12;
-const uint8_t DTC_Index_rlStringGauge = 13;
-const uint8_t DTC_Index_rrStringGauge = 14;
-const uint8_t DTC_Index_IMU = 15;
-const uint8_t DTC_Index_brakeNthrottle = 16;
-
-//GPS Device DTC Indexes
-const uint8_t DTC_Index_GPS_0 = 17;
-const uint8_t DTC_Index_GPS_1 = 18;
-
-//ADC Device DTC Indexes
-const uint8_t DTC_Index_fBrakePress = 4;
-const uint8_t DTC_Index_rBrakePress = 5;
-const uint8_t DTC_Index_steer = 6;
-const uint8_t DTC_Index_flShock = 7;
-const uint8_t DTC_Index_frShock = 8;
-const uint8_t DTC_Index_rlShock = 9;
-const uint8_t DTC_Index_rrShock = 10;
+// (DTC_Index_t enum is defined in dtc.h)
 
 //*******************************************************************
 
@@ -41,7 +17,7 @@ volatile dtc_code_handler* DTC_Error_State = &DTC_Error_State_instance;
 //Initialize the DTC handlers and allocate memory
 can_dtc frwDTC_instance, flwDTC_instance, rrwDTC_instance, 
 rlwDTC_instance, flsDTC_instance, frsDTC_instance, rlsDTC_instance, 
-rrsDTC_instance, imuDTC_instance, brakeNthrottleDTC_instance;
+rrsDTC_instance, imuDTC_instance, brakeNthrottleDTC_instance, shifterDTC_instance;
 
 //Wheel Board DTC Handlers
 can_dtc *frwDTC = &frwDTC_instance;
@@ -60,6 +36,8 @@ can_dtc *imuDTC = &imuDTC_instance;
 
 //Brake and Throttle DTC Handler
 can_dtc *brakeNthrottleDTC = &brakeNthrottleDTC_instance;
+
+can_dtc *shifterDTC = &shifterDTC_instance;
 
 //Initialize CAN Device DTC values, defines where to store DTC code and how many times to measure the avg response time
 void CAN_DTC_Init(can_dtc *data, uint8_t index, uint8_t measures, uint16_t percentage_over_allowed, uint32_t start_time){
@@ -161,6 +139,7 @@ void DTC_Init(uint32_t start_time){
 
 	//Brake and Throttle DTC Handler
 	CAN_DTC_Init(brakeNthrottleDTC, DTC_Index_brakeNthrottle, 10, 25, start_time);
+	CAN_DTC_Init(shifterDTC, DTC_Index_Shifter, 10, 25, start_time);
 
 
 	for(int i=0; i<32; i++)CLEAR_DTC(DTC_Error_State, i);
@@ -179,6 +158,7 @@ void DTC_Error_All(uint32_t time){
 	CAN_DTC_Error_Update(rrsDTC, time);
 	CAN_DTC_Error_Update(imuDTC, time);
 	CAN_DTC_Error_Update(brakeNthrottleDTC, time);
+	CAN_DTC_Error_Update(shifterDTC, time);
 
 	return;
 }

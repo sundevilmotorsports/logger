@@ -409,7 +409,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       break;
 
     case 0x40:
-      		  shift0 = RxData[0];
+    // Shifter Data
+      		    shift0 = RxData[0];
       	  	  shift1 = RxData[1];
       	  	  shift2 = RxData[2];
       	  	  if((shift1 != 1) | (shift2 != 1)) {
@@ -417,6 +418,8 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
       	  		  TXDAT[2] = shift2;
 
       	  	  }
+              if(HAL_GetTick() - shifterDTC->prevTime >= DTC_CHECK_INTERVAL) CAN_DTC_Update_All(shifterDTC, HAL_GetTick());
+
     break;
     }
 
