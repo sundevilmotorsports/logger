@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use embedded_hal::{delay::DelayNs, spi::SpiDevice};
+use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
     id::{ExtendedId, Id},
     memory::controller::{configuration::OperationMode, fifo::FifoNumber, filter::FilterNumber},
@@ -10,7 +10,7 @@ use mcp2518fd::{
     },
     ConfigError, Error, MCP2518FD,
 };
-use mcp2518fd::memory::controller::fifo::PayloadSize;
+use std::collections::HashMap;
 
 // --- Configuration types (define once at startup) ---
 
@@ -29,7 +29,10 @@ pub enum Signals {
     /// Same signals on every frame with this ID.
     Fixed(&'static [Signal]),
     /// Byte at `byte` is a type discriminator; selects which group to parse.
-    Muxed { byte: usize, groups: &'static [SignalGroup] },
+    Muxed {
+        byte: usize,
+        groups: &'static [SignalGroup],
+    },
 }
 
 pub struct CanDevice {
@@ -92,7 +95,9 @@ impl<SPI: SpiDevice> CanBus<SPI> {
                 FifoConfiguration::new(
                     8,
                     PayloadSize::Bytes64,
-                    FifoMode::Receive(RxFifoConfiguration::new().with_fifo_not_empty_interrupt(true)),
+                    FifoMode::Receive(
+                        RxFifoConfiguration::new().with_fifo_not_empty_interrupt(true),
+                    ),
                 ),
             )
             .map_err(ConfigError::Other)?;
@@ -110,7 +115,11 @@ impl<SPI: SpiDevice> CanBus<SPI> {
             .map_err(ConfigError::Other)?;
         controller.set_op_mode(OperationMode::NormalCanFD, delay)?;
 
-        Ok(Self { controller, devices: Vec::new(), latest: HashMap::new() })
+        Ok(Self {
+            controller,
+            devices: Vec::new(),
+            latest: HashMap::new(),
+        })
     }
 
     pub fn register_can_device(&mut self, device: CanDevice) {
@@ -152,13 +161,26 @@ impl<SPI: SpiDevice> CanBus<SPI> {
         Ok(self.build_frame(raw_id, extended, msg.is_fd(), msg.data()))
     }
 
-    fn build_frame(&self, raw_id: u32, extended: bool, fd: bool, data: &[u8]) -> Option<ParsedFrame> {
-        let device = self.devices.iter().find(|d| d.id == raw_id && d.extended == extended)?;
+    fn build_frame(
+        &self,
+        raw_id: u32,
+        extended: bool,
+        fd: bool,
+        data: &[u8],
+    ) -> Option<ParsedFrame> {
+        let device = self
+            .devices
+            .iter()
+            .find(|d| d.id == raw_id && d.extended == extended)?;
         let active_signals: &[Signal] = match &device.signals {
             Signals::Fixed(sigs) => sigs,
             Signals::Muxed { byte, groups } => {
                 let type_val = *data.get(*byte).unwrap_or(&0);
-                groups.iter().find(|g| g.type_val == type_val).map(|g| g.signals).unwrap_or(&[])
+                groups
+                    .iter()
+                    .find(|g| g.type_val == type_val)
+                    .map(|g| g.signals)
+                    .unwrap_or(&[])
             }
         };
         let signals = active_signals
@@ -169,6 +191,11 @@ impl<SPI: SpiDevice> CanBus<SPI> {
                 bytes: data[s.start..s.start + s.len].to_vec(),
             })
             .collect();
-        Some(ParsedFrame { id: raw_id, extended, fd, signals })
+        Some(ParsedFrame {
+            id: raw_id,
+            extended,
+            fd,
+            signals,
+        })
     }
 }

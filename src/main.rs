@@ -1,21 +1,35 @@
-mod sd;
 mod can;
+mod sd;
 
-use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
+use can::{CanBus, CanDevice, Signal, SignalGroup, Signals};
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyInputPin, InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
-use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
 use esp_idf_svc::hal::spi::config::Config as SpiConfig;
+use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
 use log::info;
 use sd::SdCard;
-use can::{CanBus, CanDevice, Signal, SignalGroup, Signals};
+use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 static SENSOR: &[SignalGroup] = &[
-    SignalGroup { type_val: 0x01, signals: &[Signal { name: "temp",    start: 1, len: 2 }] },
-    SignalGroup { type_val: 0x02, signals: &[Signal { name: "voltage", start: 1, len: 4 }] },
+    SignalGroup {
+        type_val: 0x01,
+        signals: &[Signal {
+            name: "temp",
+            start: 1,
+            len: 2,
+        }],
+    },
+    SignalGroup {
+        type_val: 0x02,
+        signals: &[Signal {
+            name: "voltage",
+            start: 1,
+            len: 4,
+        }],
+    },
 ];
 
 fn main() -> anyhow::Result<()> {
@@ -41,22 +55,25 @@ fn main() -> anyhow::Result<()> {
     // TODO: use correct pins
     let spi = SpiDriver::new(
         peripherals.spi2,
-        peripherals.pins.gpio10, // SCK
-        peripherals.pins.gpio11, // MOSI
+        peripherals.pins.gpio10,       // SCK
+        peripherals.pins.gpio11,       // MOSI
         Some(peripherals.pins.gpio12), // MISO
         &SpiDriverConfig::new(),
     )?;
     let spi_device = SpiDeviceDriver::new(spi, Some(peripherals.pins.gpio13), &SpiConfig::new())?;
 
     let mut delay = FreeRtos;
-    let mut bus = CanBus::new(spi_device, &mut delay)
-        .map_err(|_| anyhow::anyhow!("CAN init failed"))?;
+    let mut bus =
+        CanBus::new(spi_device, &mut delay).map_err(|_| anyhow::anyhow!("CAN init failed"))?;
 
     bus.register_can_device(CanDevice {
         id: 0x1,
         extended: false,
         fd: false,
-        signals: Signals::Muxed { byte: 0, groups: SENSOR },
+        signals: Signals::Muxed {
+            byte: 0,
+            groups: SENSOR,
+        },
     });
 
     let bus = Arc::new(Mutex::new(bus));
@@ -65,7 +82,9 @@ fn main() -> anyhow::Result<()> {
     let mut int_pin = PinDriver::input(peripherals.pins.gpio14, Pull::Up)?; // TODO: correct INT pin
     int_pin.set_interrupt_type(InterruptType::NegEdge)?;
     unsafe {
-        int_pin.subscribe(move || { int_tx.try_send(()).ok(); })?;
+        int_pin.subscribe(move || {
+            int_tx.try_send(()).ok();
+        })?;
     }
     int_pin.enable_interrupt()?;
 
@@ -79,7 +98,6 @@ fn main() -> anyhow::Result<()> {
                 bus_rx.lock().unwrap().poll_once().ok();
             }
         })?;
-
 
     loop {
         {
