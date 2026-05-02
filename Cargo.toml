@@ -24,7 +24,9 @@ esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
 [dependencies]
 log = "0.4"
 esp-idf-svc = { version = "0.52.1", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
+embassy-executor = { version = "0.10", features = ["executor-thread", "platform-std"] }
 embassy-time = { version = "0.5", features = ["generic-queue-8"] }
+static_cell = "2"
 anyhow = "1.0.102"
 mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
 embedded-hal = "1.0.0"
