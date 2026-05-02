@@ -1,7 +1,9 @@
 mod can;
+mod configuration;
 mod sd;
 
 use can::{CanBus, CanDevice, Signal, SignalGroup, Signals};
+use configuration::Configuration;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyInputPin, InterruptType, PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
@@ -12,25 +14,7 @@ use log::info;
 use sd::SdCard;
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
-
-static SENSOR: &[SignalGroup] = &[
-    SignalGroup {
-        type_val: 0x01,
-        signals: &[Signal {
-            name: "temp",
-            start: 1,
-            len: 2,
-        }],
-    },
-    SignalGroup {
-        type_val: 0x02,
-        signals: &[Signal {
-            name: "voltage",
-            start: 1,
-            len: 4,
-        }],
-    },
-];
+use crate::configuration::CONFIGURATION;
 
 fn main() -> anyhow::Result<()> {
     esp_idf_svc::sys::link_patches();
@@ -65,16 +49,11 @@ fn main() -> anyhow::Result<()> {
     let mut delay = FreeRtos;
     let mut bus =
         CanBus::new(spi_device, &mut delay).map_err(|_| anyhow::anyhow!("CAN init failed"))?;
-
-    bus.register_can_device(CanDevice {
-        id: 0x1,
-        extended: false,
-        fd: false,
-        signals: Signals::Muxed {
-            byte: 0,
-            groups: SENSOR,
-        },
-    });
+    
+    // TODO: load from config file on SD card
+    for device in &*CONFIGURATION.lock().unwrap().can_devices {
+        bus.register_can_device(device.clone());
+    }
 
     let bus = Arc::new(Mutex::new(bus));
 

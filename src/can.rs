@@ -11,30 +11,33 @@ use mcp2518fd::{
     ConfigError, Error, MCP2518FD,
 };
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 
-// --- Configuration types (define once at startup) ---
-
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Signal {
-    pub name: &'static str,
+    pub name: String,
     pub start: usize,
     pub len: usize,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SignalGroup {
     pub type_val: u8,
-    pub signals: &'static [Signal],
+    pub signals: Vec<Signal>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Signals {
     /// Same signals on every frame with this ID.
-    Fixed(&'static [Signal]),
+    Fixed(Vec<Signal>),
     /// Byte at `byte` is a type discriminator; selects which group to parse.
     Muxed {
         byte: usize,
-        groups: &'static [SignalGroup],
+        groups: Vec<SignalGroup>,
     },
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CanDevice {
     pub id: u32,
     pub extended: bool,
@@ -42,11 +45,9 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-// --- Output types ---
-
 #[derive(Clone)]
 pub struct ParsedSignal {
-    pub name: &'static str,
+    pub name: String,
     pub bytes: Vec<u8>,
 }
 
@@ -179,7 +180,7 @@ impl<SPI: SpiDevice> CanBus<SPI> {
                 groups
                     .iter()
                     .find(|g| g.type_val == type_val)
-                    .map(|g| g.signals)
+                    .map(|g| g.signals.as_slice())
                     .unwrap_or(&[])
             }
         };
@@ -187,7 +188,7 @@ impl<SPI: SpiDevice> CanBus<SPI> {
             .iter()
             .filter(|s| s.start + s.len <= data.len())
             .map(|s| ParsedSignal {
-                name: s.name,
+                name: s.name.clone(),
                 bytes: data[s.start..s.start + s.len].to_vec(),
             })
             .collect();
