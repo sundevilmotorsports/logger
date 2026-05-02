@@ -1,7 +1,7 @@
+use crate::can::CanDevice;
+use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 use std::sync::{LazyLock, Mutex};
-use serde::{Deserialize, Serialize};
-use crate::can::CanDevice;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Configuration {
@@ -10,7 +10,10 @@ pub struct Configuration {
 }
 
 pub static CONFIGURATION: LazyLock<Mutex<Configuration>> = LazyLock::new(|| {
-    Mutex::new(Configuration { loaded: false, can_devices: vec![] })
+    Mutex::new(Configuration {
+        loaded: false,
+        can_devices: vec![],
+    })
 });
 
 impl Configuration {
