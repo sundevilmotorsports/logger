@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use esp_idf_svc::fs::fatfs::Fatfs;
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
 use esp_idf_svc::hal::sd::mmc::{SdMmc, SdMmcHostDriver};
-use esp_idf_svc::hal::sd::{SdCardDriver, SdCardConfiguration};
+use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
 use esp_idf_svc::sys::EspError;
 use log::{error, info};
@@ -36,11 +36,25 @@ impl<'d> SdCard<'d> {
         wp: Option<impl InputPin + 'd>,
         config: &SdCardConfiguration,
     ) -> Result<Self, EspError> {
-        let host = SdMmcHostDriver::new_4bits(slot, cmd, clk, d0, d1, d2, d3, cd, wp, &Default::default())?;
+        let host = SdMmcHostDriver::new_4bits(
+            slot,
+            cmd,
+            clk,
+            d0,
+            d1,
+            d2,
+            d3,
+            cd,
+            wp,
+            &Default::default(),
+        )?;
         Self::from_host(host, config)
     }
 
-    fn from_host(host: SdMmcHostDriver<'d>, config: &SdCardConfiguration) -> Result<Self, EspError> {
+    fn from_host(
+        host: SdMmcHostDriver<'d>,
+        config: &SdCardConfiguration,
+    ) -> Result<Self, EspError> {
         let card = SdCardDriver::new_mmc(host, config)?;
         let fatfs = Fatfs::new_sdcard(0, card)?;
         let vfs = MountedFatfs::mount(fatfs, MOUNT_POINT, 4)?;
@@ -106,7 +120,10 @@ impl<'d> SdCard<'d> {
     pub fn sync(&mut self) -> Result<(), EspError> {
         if self.write_buf_len > 0 {
             let len = self.write_buf_len;
-            let f = self.current_file.as_mut().ok_or(EspError::from_infallible::<-1>())?;
+            let f = self
+                .current_file
+                .as_mut()
+                .ok_or(EspError::from_infallible::<-1>())?;
             Self::write_and_sync(f, &self.write_buf[..len])?;
             self.write_buf_len = 0;
         }
@@ -179,7 +196,9 @@ impl<'d> SdCard<'d> {
 
     fn stream_file_impl(name: &str, chunk_size: usize, cb: &mut impl FnMut(&[u8])) {
         let path = PathBuf::from(MOUNT_POINT).join(name);
-        let Ok(mut file) = File::open(&path) else { return };
+        let Ok(mut file) = File::open(&path) else {
+            return;
+        };
         let mut buf = vec![0u8; chunk_size];
         loop {
             match file.read(&mut buf) {
@@ -190,10 +209,14 @@ impl<'d> SdCard<'d> {
     }
 
     fn read_dir_logs() -> Vec<String> {
-        let Ok(dir) = fs::read_dir(MOUNT_POINT) else { return Vec::new() };
+        let Ok(dir) = fs::read_dir(MOUNT_POINT) else {
+            return Vec::new();
+        };
         dir.filter_map(|e| {
             let e = e.ok()?;
-            if !e.file_type().ok()?.is_file() { return None; }
+            if !e.file_type().ok()?.is_file() {
+                return None;
+            }
             e.file_name().into_string().ok()
         })
         .collect()
@@ -202,8 +225,7 @@ impl<'d> SdCard<'d> {
     // "XXXX.bin" -> XXXX as u32; rejects any other format.
     fn parse_index(name: &str) -> Option<u32> {
         let u = name.to_uppercase();
-        (u.len() == 8 && u.ends_with(".BIN"))
-            .then(|| u[..4].parse().ok())?
+        (u.len() == 8 && u.ends_with(".BIN")).then(|| u[..4].parse().ok())?
     }
 
     fn next_index() -> u32 {
