@@ -26,6 +26,8 @@ log = "0.4"
 esp-idf-svc = { version = "0.52.1", features = ["critical-section", "embassy-time-driver", "embassy-sync"] }
 embassy-time = { version = "0.5", features = ["generic-queue-8"] }
 anyhow = "1.0.102"
+mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
+embedded-hal = "1.0.0"
 
 [build-dependencies]
 embuild = "0.33"
