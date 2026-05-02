@@ -2,6 +2,7 @@ mod can;
 mod configuration;
 mod sd;
 
+use crate::configuration::CONFIGURATION;
 use can::CanBus;
 use embassy_time::Timer;
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -14,7 +15,6 @@ use log::info;
 use sd::SdCard;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
-use crate::configuration::CONFIGURATION;
 
 type CanBusType = CanBus<SpiDeviceDriver<'static, SpiDriver<'static>>>;
 
