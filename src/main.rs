@@ -3,13 +3,12 @@ mod configuration;
 mod sd;
 mod serial;
 
-use crate::configuration::{Configuration, CONFIGURATION};
-use crate::serial::{COMMAND_CHANNEL, RESPONSE_CHANNEL};
-use serde::Deserialize;
-use can::CanBus;
+use crate::can::LATEST_FRAMES;
+use can::{can_poll_task, CanBusType};
+use configuration::{Configuration, CONFIGURATION};
 use embassy_time::Timer;
 use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::hal::gpio::{AnyInputPin, Input, PinDriver, Pull};
+use esp_idf_svc::hal::gpio::{AnyInputPin, PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::config::Config as SpiConfig;
@@ -17,10 +16,9 @@ use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
 use esp_idf_svc::hal::usb_serial::{UsbSerialConfig, UsbSerialDriver};
 use log::info;
 use sd::SdCard;
+use serial::serial_task;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
-
-type CanBusType = CanBus<SpiDeviceDriver<'static, SpiDriver<'static>>>;
 
 fn main() {
     esp_idf_svc::sys::link_patches();
@@ -58,7 +56,7 @@ fn main() {
         .expect("SPI device init failed");
 
     let mut delay = FreeRtos;
-    let mut bus = CanBus::new(spi_device, &mut delay).expect("CAN init failed");
+    let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
 
     for device in &*CONFIGURATION.lock().unwrap().can_devices {
         bus.register_can_device(device.clone());
@@ -76,34 +74,23 @@ fn main() {
     .expect("USB serial init failed");
     serial::spawn_reader(serial);
 
-    let bus = Arc::new(Mutex::new(bus));
+    let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
 
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
     executor.run(|spawner| {
-        spawner.spawn(can_poll_task(int_pin, Arc::clone(&bus)).expect("can_poll_task"));
-        spawner.spawn(log_task(Arc::clone(&bus)).expect("log_task"));
-        spawner.spawn(serial_task(Arc::clone(&bus)).expect("serial_task"));
+        spawner.spawn(can_poll_task(int_pin, bus).expect("can_poll_task"));
+        spawner.spawn(log_task().expect("log_task"));
+        spawner.spawn(serial_task().expect("serial_task"));
     });
 }
 
 #[embassy_executor::task]
-async fn can_poll_task(mut int_pin: PinDriver<'static, Input>, bus: Arc<Mutex<CanBusType>>) {
-    loop {
-        int_pin.wait_for_falling_edge().await.ok();
-
-        if let Err(e) = bus.lock().unwrap().poll_once() {
-            log::warn!("CAN poll error: {:?}", e);
-        }
-    }
-}
-
-#[embassy_executor::task]
-async fn log_task(bus: Arc<Mutex<CanBusType>>) {
+pub async fn log_task() {
     loop {
         {
-            let guard = bus.lock().unwrap();
-            for (id, frame) in guard.all_frames() {
+            let frames = LATEST_FRAMES.lock().unwrap();
+            for (id, frame) in frames.iter() {
                 info!("0x{:03x} [fd={}]", id, frame.fd);
                 for sig in &frame.signals {
                     info!("  {} = {:?}", sig.name, sig.bytes);
@@ -112,81 +99,5 @@ async fn log_task(bus: Arc<Mutex<CanBusType>>) {
         }
 
         Timer::after_millis(50).await;
-    }
-}
-
-#[embassy_executor::task]
-async fn serial_task(bus: Arc<Mutex<CanBusType>>) {
-    loop {
-        let line = COMMAND_CHANNEL.receive().await;
-        let response = handle_command(&line, &bus);
-        RESPONSE_CHANNEL.send(response).await;
-    }
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "cmd", rename_all = "snake_case")]
-enum Command {
-    Ping,
-    Status,
-    GetConfig,
-    SetConfig { args: Configuration },
-    Frames,
-}
-
-fn handle_command(payload: &str, bus: &Arc<Mutex<CanBusType>>) -> String {
-    let ok = |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
-    let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
-
-    let cmd: Command = match serde_json::from_str(payload) {
-        Ok(c) => c,
-        Err(e) => return err(format!("invalid command: {e}")),
-    };
-
-    match cmd {
-        Command::Ping => ok(serde_json::json!("pong")),
-
-        Command::Status => {
-            let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();
-            ok(serde_json::json!({ "config_loaded": loaded }))
-        }
-
-        Command::GetConfig => match Configuration::json() {
-            Ok(j) => {
-                let v: serde_json::Value = serde_json::from_str(&j).unwrap_or_default();
-                ok(v)
-            }
-            Err(e) => err(e.to_string()),
-        },
-
-        Command::SetConfig { args } => {
-            let mut guard = CONFIGURATION.lock().unwrap();
-            guard.can_devices = args.can_devices;
-            drop(guard);
-            ok(serde_json::Value::Null)
-        }
-
-        Command::Frames => {
-            let snapshot: Vec<_> = {
-                let guard = bus.lock().unwrap();
-                guard
-                    .all_frames()
-                    .iter()
-                    .map(|(id, frame)| {
-                        let signals: Vec<_> = frame
-                            .signals
-                            .iter()
-                            .map(|s| serde_json::json!({"name": s.name, "bytes": s.bytes}))
-                            .collect();
-                        serde_json::json!({
-                            "id": format!("0x{id:03x}"),
-                            "fd": frame.fd,
-                            "signals": signals,
-                        })
-                    })
-                    .collect()
-            };
-            ok(serde_json::json!(snapshot))
-        }
     }
 }
