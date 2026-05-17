@@ -1,4 +1,8 @@
+use embassy_time::Timer;
 use embedded_hal::{delay::DelayNs, spi::SpiDevice};
+use esp_idf_svc::hal::gpio::{Input, PinDriver};
+use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
+use log::info;
 use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
     id::{ExtendedId, Id},
@@ -12,6 +16,25 @@ use mcp2518fd::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, Mutex};
+
+pub type CanBusType = CanBus<SpiDeviceDriver<'static, SpiDriver<'static>>>;
+
+pub static LATEST_FRAMES: LazyLock<Mutex<HashMap<u32, ParsedFrame>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+#[embassy_executor::task]
+pub async fn can_poll_task(mut int_pin: PinDriver<'static, Input>, bus: Arc<Mutex<CanBusType>>) {
+    loop {
+        int_pin.wait_for_falling_edge().await.ok();
+
+        let mut guard = bus.lock().unwrap();
+        if let Err(e) = guard.poll_once() {
+            log::warn!("CAN poll error: {:?}", e);
+        }
+        *LATEST_FRAMES.lock().unwrap() = guard.all_frames().clone();
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Signal {

@@ -1,13 +1,91 @@
+use crate::can;
+use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use esp_idf_svc::hal::delay;
 use esp_idf_svc::hal::usb_serial::UsbSerialDriver;
+use serde::Deserialize;
 
 const MAX_PAYLOAD: usize = 16 * 1024;
 
 pub static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
-
 pub static RESPONSE_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
+
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum Command {
+    Ping,
+    Status,
+    GetConfig,
+    SetConfig { args: Configuration },
+    Frames,
+}
+
+#[embassy_executor::task]
+pub async fn serial_task() {
+    loop {
+        let payload = COMMAND_CHANNEL.receive().await;
+        let response = handle_command(&payload);
+        RESPONSE_CHANNEL.send(response).await;
+    }
+}
+
+fn handle_command(payload: &str) -> String {
+    let ok =
+        |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
+    let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
+
+    let cmd: Command = match serde_json::from_str(payload) {
+        Ok(c) => c,
+        Err(e) => return err(format!("invalid command: {e}")),
+    };
+
+    match cmd {
+        Command::Ping => ok(serde_json::json!("pong")),
+
+        Command::Status => {
+            let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();
+            ok(serde_json::json!({ "config_loaded": loaded }))
+        }
+
+        Command::GetConfig => match Configuration::json() {
+            Ok(j) => {
+                let v: serde_json::Value = serde_json::from_str(&j).unwrap_or_default();
+                ok(v)
+            }
+            Err(e) => err(e.to_string()),
+        },
+
+        Command::SetConfig { args } => {
+            let mut guard = CONFIGURATION.lock().unwrap();
+            guard.can_devices = args.can_devices;
+            drop(guard);
+            ok(serde_json::Value::Null)
+        }
+
+        Command::Frames => {
+            let snapshot: Vec<_> = {
+                let frames = can::LATEST_FRAMES.lock().unwrap();
+                frames
+                    .iter()
+                    .map(|(id, frame)| {
+                        let signals: Vec<_> = frame
+                            .signals
+                            .iter()
+                            .map(|s| serde_json::json!({"name": s.name, "bytes": s.bytes}))
+                            .collect();
+                        serde_json::json!({
+                            "id": format!("0x{id:03x}"),
+                            "fd": frame.fd,
+                            "signals": signals,
+                        })
+                    })
+                    .collect()
+            };
+            ok(serde_json::json!(snapshot))
+        }
+    }
+}
 
 pub fn spawn_reader(driver: UsbSerialDriver<'static>) {
     std::thread::Builder::new()
