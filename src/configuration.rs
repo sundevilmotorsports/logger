@@ -45,7 +45,7 @@ impl Configuration {
         self.nvs.as_mut()
     }
 
-    fn load_json(json: &str) -> Result<(), serde_json::Error> {
+    pub fn load_json(json: &str) -> Result<(), serde_json::Error> {
         let config: Configuration = serde_json::from_str(json)?;
         let mut guard = CONFIGURATION.lock().unwrap();
         guard.can_devices = config.can_devices;
