@@ -2,7 +2,7 @@ mod can;
 mod configuration;
 mod sd;
 
-use crate::configuration::CONFIGURATION;
+use crate::configuration::{Configuration, CONFIGURATION};
 use can::CanBus;
 use embassy_time::Timer;
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -39,6 +39,8 @@ fn main() {
     )
     .expect("SD card init failed");
 
+    Configuration::init().expect("config init failed");
+
     // TODO: use correct pins
     let spi = SpiDriver::new(
         peripherals.spi2,
@@ -54,7 +56,6 @@ fn main() {
     let mut delay = FreeRtos;
     let mut bus = CanBus::new(spi_device, &mut delay).expect("CAN init failed");
 
-    // TODO: load from config file on SD card
     for device in &*CONFIGURATION.lock().unwrap().can_devices {
         bus.register_can_device(device.clone());
     }
