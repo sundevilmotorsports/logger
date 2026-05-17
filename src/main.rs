@@ -5,6 +5,7 @@ mod serial;
 
 use crate::configuration::{Configuration, CONFIGURATION};
 use crate::serial::{COMMAND_CHANNEL, RESPONSE_CHANNEL};
+use serde::Deserialize;
 use can::CanBus;
 use embassy_time::Timer;
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -123,29 +124,34 @@ async fn serial_task(bus: Arc<Mutex<CanBusType>>) {
     }
 }
 
-fn handle_command(line: &str, bus: &Arc<Mutex<CanBusType>>) -> String {
+#[derive(Deserialize)]
+#[serde(tag = "cmd", rename_all = "snake_case")]
+enum Command {
+    Ping,
+    Status,
+    GetConfig,
+    SetConfig { args: Configuration },
+    Frames,
+}
+
+fn handle_command(payload: &str, bus: &Arc<Mutex<CanBusType>>) -> String {
     let ok = |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
     let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
 
-    let msg: serde_json::Value = match serde_json::from_str(line) {
-        Ok(v) => v,
-        Err(e) => return err(format!("invalid JSON: {e}")),
-    };
-
-    let cmd = match msg["cmd"].as_str() {
-        Some(c) => c,
-        None => return err("missing 'cmd' field".into()),
+    let cmd: Command = match serde_json::from_str(payload) {
+        Ok(c) => c,
+        Err(e) => return err(format!("invalid command: {e}")),
     };
 
     match cmd {
-        "ping" => ok(serde_json::json!("pong")),
+        Command::Ping => ok(serde_json::json!("pong")),
 
-        "status" => {
+        Command::Status => {
             let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();
             ok(serde_json::json!({ "config_loaded": loaded }))
         }
 
-        "get_config" => match Configuration::json() {
+        Command::GetConfig => match Configuration::json() {
             Ok(j) => {
                 let v: serde_json::Value = serde_json::from_str(&j).unwrap_or_default();
                 ok(v)
@@ -153,15 +159,14 @@ fn handle_command(line: &str, bus: &Arc<Mutex<CanBusType>>) -> String {
             Err(e) => err(e.to_string()),
         },
 
-        "set_config" => {
-            let args = msg["args"].to_string();
-            match Configuration::load_json(&args) {
-                Ok(()) => ok(serde_json::Value::Null),
-                Err(e) => err(e.to_string()),
-            }
+        Command::SetConfig { args } => {
+            let mut guard = CONFIGURATION.lock().unwrap();
+            guard.can_devices = args.can_devices;
+            drop(guard);
+            ok(serde_json::Value::Null)
         }
 
-        "frames" => {
+        Command::Frames => {
             let snapshot: Vec<_> = {
                 let guard = bus.lock().unwrap();
                 guard
@@ -183,7 +188,5 @@ fn handle_command(line: &str, bus: &Arc<Mutex<CanBusType>>) -> String {
             };
             ok(serde_json::json!(snapshot))
         }
-
-        _ => err(format!("unknown command '{cmd}'")),
     }
 }
