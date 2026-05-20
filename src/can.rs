@@ -2,7 +2,6 @@ use embassy_time::Timer;
 use embedded_hal::{delay::DelayNs, spi::SpiDevice};
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
-use log::info;
 use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
     id::{ExtendedId, Id},
