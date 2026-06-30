@@ -13,8 +13,7 @@ use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::config::Config as SpiConfig;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
-use esp_idf_svc::hal::uart::{UartConfig, UartDriver};
-use esp_idf_svc::hal::units::Hertz;
+use esp_idf_svc::hal::usb_serial::{UsbSerialConfig, UsbSerialDriver};
 use log::info;
 // use sd::SdCard;
 use serial::serial_task;
@@ -66,17 +65,14 @@ fn main() {
     // let int_pin = PinDriver::input(peripherals.pins.gpio14, Pull::Up) // TODO: correct INT pin
     //     .expect("INT pin init failed");
 
-    // UART0 — TX=GPIO1, RX=GPIO3 (default console pins on ESP32)
-    let uart = UartDriver::new(
-        peripherals.uart0,
-        peripherals.pins.gpio1,
-        peripherals.pins.gpio3,
-        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
-        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
-        &UartConfig::new().baudrate(Hertz(115_200)),
+    let usb_serial = UsbSerialDriver::new(
+        peripherals.usb_serial,
+        peripherals.pins.gpio24, // USB D-
+        peripherals.pins.gpio25, // USB D+
+        &UsbSerialConfig::new(),
     )
-    .expect("UART init failed");
-    serial::spawn_reader(uart);
+    .expect("USB serial init failed");
+    serial::spawn_reader(usb_serial);
 
     // let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
 
