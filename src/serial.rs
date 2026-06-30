@@ -3,7 +3,7 @@ use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use esp_idf_svc::hal::delay;
-use esp_idf_svc::hal::uart::UartDriver;
+use esp_idf_svc::hal::usb_serial::UsbSerialDriver;
 use esp_idf_svc::sys::esp_timer_get_time;
 use esp_idf_svc::systime::EspSystemTime;
 use serde::Deserialize;
@@ -95,20 +95,20 @@ fn handle_command(payload: &str) -> String {
     }
 }
 
-pub fn spawn_reader(driver: UartDriver<'static>) {
+pub fn spawn_reader(driver: UsbSerialDriver<'static>) {
     std::thread::Builder::new()
         .stack_size(8192)
         .spawn(move || reader_thread(driver))
         .expect("serial reader thread");
 }
 
-fn reader_thread(mut driver: UartDriver<'static>) {
+fn reader_thread(mut driver: UsbSerialDriver<'static>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 64];
 
     loop {
         while let Ok(resp) = RESPONSE_CHANNEL.try_receive() {
-            let _ = driver.write(resp.as_bytes());
+            let _ = driver.write(resp.as_bytes(), delay::BLOCK);
         }
 
         let n = driver.read(&mut tmp, 10).unwrap_or(0);
