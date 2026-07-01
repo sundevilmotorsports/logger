@@ -1,6 +1,6 @@
 mod can;
 mod configuration;
-// mod sd;
+mod sd;
 mod serial;
 
 use crate::can::LATEST_FRAMES;
@@ -15,7 +15,7 @@ use esp_idf_svc::hal::spi::config::Config as SpiConfig;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
 use esp_idf_svc::hal::usb_serial::{UsbSerialConfig, UsbSerialDriver};
 use log::info;
-// use sd::SdCard;
+use sd::SdCard;
 use serial::serial_task;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
@@ -26,22 +26,21 @@ fn main() {
 
     let peripherals = Peripherals::take().expect("failed to take peripherals");
 
-    // TODO: use correct pins
-    // let _sd = SdCard::new(
-    //     peripherals.sdmmc0,
-    //     peripherals.pins.gpio4,
-    //     peripherals.pins.gpio5,
-    //     peripherals.pins.gpio6,
-    //     peripherals.pins.gpio7,
-    //     peripherals.pins.gpio8,
-    //     peripherals.pins.gpio9,
-    //     AnyInputPin::none(),
-    //     AnyInputPin::none(),
-    //     &SdCardConfiguration::default(),
-    // )
-    // .expect("SD card init failed");
-    //
-    // Configuration::init().expect("config init failed");
+    let _sd = SdCard::new(
+        peripherals.sdmmc0,
+        peripherals.pins.gpio44, // cmd
+        peripherals.pins.gpio43, // clk
+        peripherals.pins.gpio39, // d0
+        peripherals.pins.gpio40, // d1
+        peripherals.pins.gpio41, // d2
+        peripherals.pins.gpio42, // d3
+        AnyInputPin::none(),
+        AnyInputPin::none(),
+        &SdCardConfiguration::default(),
+    )
+    .expect("SD card init failed");
+
+    Configuration::init().expect("config init failed");
 
     // TODO: use correct pins
     // let spi = SpiDriver::new(
