@@ -1,4 +1,4 @@
-use crate::can;
+use crate::{can, gnss};
 use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
@@ -22,6 +22,7 @@ enum Command {
     SetConfig { args: Configuration },
     Frames,
     Uptime,
+    Gps,
 }
 
 #[embassy_executor::task]
@@ -92,6 +93,11 @@ fn handle_command(payload: &str) -> String {
             let time = unsafe { esp_timer_get_time() as f64 / 1_000_000.0 } as u64;
             ok(serde_json::json!({ "uptime_seconds": time }))
         }
+
+        Command::Gps => match &*gnss::LATEST_FIX.lock().unwrap() {
+            Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
+            None => err("no fix".into()),
+        },
     }
 }
 
