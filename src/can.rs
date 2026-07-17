@@ -4,12 +4,13 @@ use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
-    id::{ExtendedId, Id},
+    id::{ExtendedId, Id, StandardId},
     memory::controller::{configuration::OperationMode, fifo::FifoNumber, filter::FilterNumber},
+    message::tx::TxMessage,
     settings::{
         BitTimeConfiguration, DataBitTimeConfiguration, FifoConfiguration, FifoMode,
         FilterConfiguration, FilterMatchMode, IoConfiguration, NominalBitTimeConfiguration,
-        OscillatorConfiguration, RxFifoConfiguration, Settings,
+        OscillatorConfiguration, RxFifoConfiguration, Settings, TxFifoConfiguration,
     },
     ConfigError, Error, MCP2518FD,
 };
@@ -126,6 +127,17 @@ impl<SPI: SpiDevice> CanBus<SPI> {
             .map_err(ConfigError::Other)?;
 
         controller
+            .configure_fifo(
+                FifoNumber::Fifo2,
+                FifoConfiguration::new(
+                    1,
+                    PayloadSize::Bytes64,
+                    FifoMode::Transmit(TxFifoConfiguration::new(0)),
+                ),
+            )
+            .map_err(ConfigError::Other)?;
+
+        controller
             .configure_filter(
                 FilterNumber::Filter0,
                 Some(FilterConfiguration {
@@ -221,4 +233,66 @@ impl<SPI: SpiDevice> CanBus<SPI> {
             signals,
         })
     }
+
+    /// Verifies the TX/RX path using the controller's internal loopback mode:
+    /// transmits a known frame and checks it comes back unchanged
+    pub fn self_test(&mut self, delay: &mut impl DelayNs) -> Result<(), SelfTestError> {
+        const TEST_ID: u16 = 0x123;
+        const TEST_DATA: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];
+
+        self.controller
+            .set_op_mode(OperationMode::Configuration, delay)
+            .map_err(SelfTestError::Config)?;
+        self.controller
+            .set_op_mode(OperationMode::InternalLoopback, delay)
+            .map_err(SelfTestError::Config)?;
+
+        let msg = TxMessage::new_2_0(StandardId::new(TEST_ID).unwrap(), &TEST_DATA).unwrap();
+        let result = self
+            .controller
+            .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
+            .map_err(SelfTestError::Comm)
+            .and_then(|()| {
+                let mut outcome = Err(SelfTestError::NoResponse);
+                for _ in 0..10 {
+                    match self.controller.rx_fifo_get_next(FifoNumber::Fifo1) {
+                        Ok(Some(rx)) => {
+                            let id_matches =
+                                matches!(rx.id(), Id::Standard(id) if id.as_raw() == TEST_ID);
+                            outcome = if id_matches && rx.data() == TEST_DATA {
+                                Ok(())
+                            } else {
+                                Err(SelfTestError::Mismatch)
+                            };
+                            break;
+                        }
+                        Ok(None) => delay.delay_ms(1),
+                        Err(e) => {
+                            outcome = Err(SelfTestError::Comm(e));
+                            break;
+                        }
+                    }
+                }
+                outcome
+            });
+
+        self.controller
+            .set_op_mode(OperationMode::Configuration, delay)
+            .map_err(SelfTestError::Config)?;
+        self.controller
+            .set_op_mode(OperationMode::NormalCanFD, delay)
+            .map_err(SelfTestError::Config)?;
+
+        result
+    }
+}
+
+#[derive(Debug)]
+pub enum SelfTestError {
+    Config(ConfigError),
+    Comm(Error),
+    /// No frame was looped back within the timeout.
+    NoResponse,
+    /// A frame was received but its ID or payload didn't match what was sent.
+    Mismatch,
 }

@@ -46,19 +46,23 @@ fn main() {
     Configuration::init().expect("config init failed");
 
     // TODO: use correct pins
-    // let spi = SpiDriver::new(
-    //     peripherals.spi2,
-    //     peripherals.pins.gpio10,       // SCK
-    //     peripherals.pins.gpio11,       // MOSI
-    //     Some(peripherals.pins.gpio12), // MISO
-    //     &SpiDriverConfig::new(),
-    // )
-    // .expect("SPI driver init failed");
-    // let spi_device = SpiDeviceDriver::new(spi, Some(peripherals.pins.gpio13), &SpiConfig::new())
-    //     .expect("SPI device init failed");
-    //
-    // let mut delay = FreeRtos;
-    // let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
+    let spi = SpiDriver::new(
+        peripherals.spi2,
+        peripherals.pins.gpio30,       // SCK
+        peripherals.pins.gpio29,       // MOSI
+        Some(peripherals.pins.gpio31), // MISO
+        &SpiDriverConfig::new(),
+    )
+    .expect("SPI driver init failed");
+    let spi_device = SpiDeviceDriver::new(spi, Some(peripherals.pins.gpio34), &SpiConfig::new())
+        .expect("SPI device init failed");
+    
+    let mut delay = FreeRtos;
+    let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
+    match bus.self_test(&mut delay) {
+        Ok(()) => info!("CAN self-test passed"),
+        Err(e) => log::error!("CAN self-test failed: {:?}", e),
+    }
     //
     // for device in &*CONFIGURATION.lock().unwrap().can_devices {
     //     bus.register_can_device(device.clone());
