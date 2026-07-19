@@ -13,6 +13,13 @@ build-std = ["std", "panic_abort"]
 MCU = "esp32p4"
 ESP_IDF_VERSION = "v5.5.3"
 ESP_IDF_TOOLS_INSTALL_DIR = "workspace"
+# esp-idf-sys's bindgen pass doesn't inherit the -DCFG_TUSB_MCU define that the
+# real CMake build propagates from the esp_tinyusb component, so TinyUSB's
+# tusb_mcu.h can't tell it's building for ESP32-P4 and never sets its FreeRTOS
+# include path, breaking bindgen with "FreeRTOS.h file not found". Supplying
+# it here (bindgen reads this env var directly) fixes that without touching
+# esp-idf-sys itself.
+BINDGEN_EXTRA_CLANG_ARGS = "-DCFG_TUSB_MCU=OPT_MCU_ESP32P4"
 
 # Uncomment this if you have moved the target dir by setting CARGO_TARGET_DIR or similar.
 # Required for now due to embuild limitations.

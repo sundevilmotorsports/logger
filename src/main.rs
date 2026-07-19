@@ -3,6 +3,7 @@ mod configuration;
 mod gnss;
 mod sd;
 mod serial;
+mod usb_hs;
 
 use crate::can::LATEST_FRAMES;
 use can::{can_poll_task, CanBusType};
@@ -16,12 +17,12 @@ use esp_idf_svc::hal::spi::config::Config as SpiConfig;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
 use esp_idf_svc::hal::uart::{config as uart_config, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
-use esp_idf_svc::hal::usb_serial::{UsbSerialConfig, UsbSerialDriver};
 use log::info;
 use sd::SdCard;
 use serial::serial_task;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
+use usb_hs::UsbHsCdc;
 
 fn main() {
     esp_idf_svc::sys::link_patches();
@@ -81,15 +82,9 @@ fn main() {
     )
     .expect("GNSS UART init failed");
     gnss::spawn_reader(gnss_uart);
-
-    let usb_serial = UsbSerialDriver::new(
-        peripherals.usb_serial,
-        peripherals.pins.gpio24, // USB D-
-        peripherals.pins.gpio25, // USB D+
-        &UsbSerialConfig::new(),
-    )
-    .expect("USB serial init failed");
-    serial::spawn_reader(usb_serial);
+    
+    let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
+    serial::spawn_reader(usb_hs);
 
     // let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
 

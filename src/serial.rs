@@ -1,9 +1,9 @@
+use crate::usb_hs::UsbHsCdc;
 use crate::{can, gnss};
 use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
-use esp_idf_svc::hal::delay;
-use esp_idf_svc::hal::usb_serial::UsbSerialDriver;
+use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::sys::esp_timer_get_time;
 use esp_idf_svc::systime::EspSystemTime;
 use serde::Deserialize;
@@ -101,14 +101,16 @@ fn handle_command(payload: &str) -> String {
     }
 }
 
-pub fn spawn_reader(driver: UsbSerialDriver<'static>) {
+pub fn spawn_reader(driver: UsbHsCdc) {
     std::thread::Builder::new()
         .stack_size(8192)
         .spawn(move || reader_thread(driver))
         .expect("serial reader thread");
 }
 
-fn reader_thread(mut driver: UsbSerialDriver<'static>) {
+fn reader_thread(mut driver: UsbHsCdc) {
+    use embedded_hal::delay::DelayNs;
+
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 64];
 
@@ -117,7 +119,10 @@ fn reader_thread(mut driver: UsbSerialDriver<'static>) {
             let _ = driver.write(resp.as_bytes(), delay::BLOCK);
         }
 
-        let n = driver.read(&mut tmp, 10).unwrap_or(0);
+        let n = driver.read(&mut tmp).unwrap_or(0);
+        if n == 0 {
+            FreeRtos.delay_ms(10);
+        }
         for &b in &tmp[..n] {
             if b == b'\n' {
                 let payload = String::from_utf8_lossy(&buf).trim().to_string();
