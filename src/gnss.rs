@@ -1,3 +1,4 @@
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay;
 use esp_idf_svc::hal::uart::UartDriver;
 use serde::Serialize;
@@ -10,9 +11,12 @@ pub struct Fix {
     pub alt_m: f64,
     pub sats: u8,
     pub quality: u8,
+    pub utc: Option<NaiveDateTime>,
 }
 
 pub static LATEST_FIX: LazyLock<Mutex<Option<Fix>>> = LazyLock::new(|| Mutex::new(None));
+
+static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
 
 pub fn spawn_reader(driver: UartDriver<'static>) {
     std::thread::Builder::new()
@@ -24,13 +28,16 @@ pub fn spawn_reader(driver: UartDriver<'static>) {
 fn reader_thread(driver: UartDriver<'static>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
-
     loop {
         let n = driver.read(&mut tmp, delay::BLOCK).unwrap_or(0);
         for &b in &tmp[..n] {
             if b == b'\n' {
                 if let Ok(line) = std::str::from_utf8(&buf) {
-                    if let Some(fix) = parse_gga(line.trim_end_matches('\r')) {
+                    let line = line.trim_end_matches('\r');
+                    if let Some(date) = parse_rmc_date(line) {
+                        *LATEST_DATE.lock().unwrap() = Some(date);
+                    }
+                    if let Some(fix) = parse_gga(line) {
                         *LATEST_FIX.lock().unwrap() = Some(fix);
                     }
                 }
@@ -56,10 +63,18 @@ fn parse_gga(line: &str) -> Option<Fix> {
     if f.len() < 10 || !f[0].ends_with("GGA") {
         return None;
     }
+
     let quality: u8 = f[6].parse().ok()?;
     if quality == 0 {
         return None; // no fix yet
     }
+
+    let utc = parse_time(f[1]).and_then(|time| {
+        LATEST_DATE
+            .lock()
+            .unwrap()
+            .map(|date| NaiveDateTime::new(date, time))
+    });
 
     Some(Fix {
         lat: dm_to_deg(f[2])? * if f[3] == "S" { -1.0 } else { 1.0 },
@@ -67,7 +82,46 @@ fn parse_gga(line: &str) -> Option<Fix> {
         alt_m: f[9].parse().ok()?,
         sats: f[7].parse().ok()?,
         quality,
+        utc,
     })
+}
+
+// $GxRMC,time,status,lat,N,lon,E,speed,track,ddmmyy,...*checksum
+fn parse_rmc_date(line: &str) -> Option<NaiveDate> {
+    let (body, sum) = line.strip_prefix('$')?.split_once('*')?;
+    if u8::from_str_radix(sum, 16).ok()? != body.bytes().fold(0, |a, b| a ^ b) {
+        return None;
+    }
+    let f: Vec<&str> = body.split(',').collect();
+    if f.len() < 10 || !f[0].ends_with("RMC") {
+        return None;
+    }
+    if f[2] != "A" {
+        return None; // status void, don't trust the date
+    }
+    let d = f[9];
+    if d.len() != 6 {
+        return None;
+    }
+    let day: u32 = d[0..2].parse().ok()?;
+    let month: u32 = d[2..4].parse().ok()?;
+    let yy: i32 = d[4..6].parse().ok()?;
+
+    let year = if yy < 80 { 2000 + yy } else { 1900 + yy };
+    NaiveDate::from_ymd_opt(year, month, day)
+}
+
+// hhmmss.sss -> NaiveTime
+fn parse_time(s: &str) -> Option<NaiveTime> {
+    if s.len() < 6 {
+        return None;
+    }
+    let h: u32 = s[0..2].parse().ok()?;
+    let m: u32 = s[2..4].parse().ok()?;
+    let sec: f64 = s[4..].parse().ok()?;
+    let whole_sec = sec.trunc() as u32;
+    let milli = ((sec.fract()) * 1000.0).round() as u32;
+    NaiveTime::from_hms_milli_opt(h, m, whole_sec, milli)
 }
 
 // (d)ddmm.mmmmm -> decimal degrees
