@@ -1,14 +1,15 @@
+mod adc;
 mod can;
 mod configuration;
 mod gnss;
+mod logging;
 mod sd;
+mod sd_fake;
 mod serial;
 mod usb_hs;
 
-use crate::can::LATEST_FRAMES;
 use can::{can_poll_task, CanBusType};
-use configuration::{Configuration, CONFIGURATION};
-use embassy_time::Timer;
+use configuration::Configuration;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyInputPin, PinDriver, Pull};
 use esp_idf_svc::hal::peripherals::Peripherals;
@@ -30,6 +31,9 @@ fn main() {
 
     let peripherals = Peripherals::take().expect("failed to take peripherals");
 
+    // Real SD hardware is dead (CMD/CLK nets open on the board) -> sd_fake::SD
+    // (an in-memory fake) stands in until it's fixed. Swap back to the block
+    // below then.
     // let _sd = SdCard::new(
     //     peripherals.sdmmc0,
     //     peripherals.pins.gpio44, // cmd
@@ -46,7 +50,8 @@ fn main() {
 
     Configuration::init().expect("config init failed");
 
-    // TODO: use correct pins
+    // TODO: use correct pins. SPI1 isn't usable for general peripherals on
+    // this chip, so CAN and ADC share this one SPI2 bus via separate CS pins.
     let spi = SpiDriver::new(
         peripherals.spi2,
         peripherals.pins.gpio30,       // SCK
@@ -55,8 +60,10 @@ fn main() {
         &SpiDriverConfig::new(),
     )
     .expect("SPI driver init failed");
-    let spi_device = SpiDeviceDriver::new(spi, Some(peripherals.pins.gpio34), &SpiConfig::new())
-        .expect("SPI device init failed");
+    let spi = Arc::new(spi);
+    let spi_device =
+        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio34), &SpiConfig::new())
+            .expect("SPI device init failed");
     
     let mut delay = FreeRtos;
     let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
@@ -86,30 +93,23 @@ fn main() {
     let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
     serial::spawn_reader(usb_hs);
 
+    // ADC is a TI ADS7951 (12-bit, 8ch) on the shared SPI2 bus, own CS pin.
+    let adc_spi_device = // TODO: correct CS pin
+        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio25), &SpiConfig::new())
+            .expect("ADC SPI device init failed");
+    let adc_bus: Arc<Mutex<adc::AdcBusType>> = Arc::new(Mutex::new(adc::AdcBus::new(
+        adc_spi_device,
+        adc::Range::R5V,
+    )));
+
     // let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
 
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
-    executor.run(|spawner| {
+    executor.run(move |spawner| {
         // spawner.spawn(can_poll_task(int_pin, bus).expect("can_poll_task"));
-        // spawner.spawn(log_task().expect("log_task"));
         spawner.spawn(serial_task().expect("serial_task"));
+        spawner.spawn(adc::adc_poll_task(adc_bus).expect("adc_poll_task"));
+        spawner.spawn(logging::log_task().expect("log_task"));
     });
-}
-
-#[embassy_executor::task]
-pub async fn log_task() {
-    loop {
-        {
-            let frames = LATEST_FRAMES.lock().unwrap();
-            for (id, frame) in frames.iter() {
-                info!("0x{:03x} [fd={}]", id, frame.fd);
-                for sig in &frame.signals {
-                    info!("  {} = {:?}", sig.name, sig.bytes);
-                }
-            }
-        }
-
-        Timer::after_millis(50).await;
-    }
 }

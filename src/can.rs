@@ -18,7 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-pub type CanBusType = CanBus<SpiDeviceDriver<'static, SpiDriver<'static>>>;
+// CAN and ADC share one physical SPI2 bus (SPI1 isn't available for general
+// use on this chip), each on its own CS line -> the bus handle is shared.
+pub type CanBusType = CanBus<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>;
 
 pub static LATEST_FRAMES: LazyLock<Mutex<HashMap<u32, ParsedFrame>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));

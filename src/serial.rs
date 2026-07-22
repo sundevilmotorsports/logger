@@ -1,17 +1,27 @@
 use crate::usb_hs::UsbHsCdc;
-use crate::{can, gnss};
+use crate::{can, gnss, logging, sd_fake};
 use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
+use embassy_time::Timer;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
-use esp_idf_svc::sys::esp_timer_get_time;
+use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
 use esp_idf_svc::systime::EspSystemTime;
 use serde::Deserialize;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const MAX_PAYLOAD: usize = 16 * 1024;
 
+/// Bytes per `LogChunk` response; the client requests successive offsets
+/// until it gets back fewer than this many bytes.
+const LOG_CHUNK_LEN: usize = 512;
+
 pub static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
 pub static RESPONSE_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
+
+/// Set by `Command::Reboot`; checked after its ack is sent so the client
+/// gets a clean response before the device actually goes down.
+static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Deserialize)]
 #[serde(tag = "cmd", rename_all = "snake_case")]
@@ -23,6 +33,12 @@ enum Command {
     Frames,
     Uptime,
     Gps,
+    ListLogs,
+    LogChunk { name: String, offset: u64 },
+    LogStatus,
+    SetLogging { active: bool },
+    NextLog,
+    Reboot,
 }
 
 #[embassy_executor::task]
@@ -31,6 +47,11 @@ pub async fn serial_task() {
         let payload = COMMAND_CHANNEL.receive().await;
         let response = handle_command(&payload);
         RESPONSE_CHANNEL.send(response).await;
+
+        if REBOOT_REQUESTED.load(Ordering::Relaxed) {
+            Timer::after_millis(200).await; // give the ack time to actually flush over USB
+            unsafe { esp_restart() };
+        }
     }
 }
 
@@ -63,6 +84,7 @@ fn handle_command(payload: &str) -> String {
         Command::SetConfig { args } => {
             let mut guard = CONFIGURATION.lock().unwrap();
             guard.can_devices = args.can_devices;
+            guard.adc_channels = args.adc_channels;
             drop(guard);
             ok(serde_json::Value::Null)
         }
@@ -98,6 +120,50 @@ fn handle_command(payload: &str) -> String {
             Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
             None => err("no fix".into()),
         },
+
+        Command::ListLogs => {
+            let sd = sd_fake::SD.lock().unwrap();
+            let logs: Vec<_> = sd
+                .list_logs()
+                .iter()
+                .map(|name| serde_json::json!({"name": name, "size": sd.file_size(name)}))
+                .collect();
+            ok(serde_json::json!(logs))
+        }
+
+        Command::LogChunk { name, offset } => {
+            let sd = sd_fake::SD.lock().unwrap();
+            match sd.read_chunk(&name, offset, LOG_CHUNK_LEN) {
+                Some(chunk) => ok(serde_json::json!({
+                    "data": String::from_utf8_lossy(chunk),
+                    "eof": chunk.len() < LOG_CHUNK_LEN,
+                })),
+                None => err(format!("no such log: {name}")),
+            }
+        }
+
+        Command::LogStatus => {
+            let current = sd_fake::SD.lock().unwrap().current_name();
+            ok(serde_json::json!({
+                "active": logging::ACTIVE.load(std::sync::atomic::Ordering::Relaxed),
+                "current": current,
+            }))
+        }
+
+        Command::SetLogging { active } => {
+            logging::ACTIVE.store(active, std::sync::atomic::Ordering::Relaxed);
+            ok(serde_json::Value::Null)
+        }
+
+        Command::NextLog => {
+            sd_fake::SD.lock().unwrap().next_log().ok();
+            ok(serde_json::Value::Null)
+        }
+
+        Command::Reboot => {
+            REBOOT_REQUESTED.store(true, Ordering::Relaxed);
+            ok(serde_json::Value::Null)
+        }
     }
 }
 

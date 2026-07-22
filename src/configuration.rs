@@ -1,3 +1,4 @@
+use crate::adc::AdcChannel;
 use crate::can::CanDevice;
 use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,8 @@ use std::sync::{LazyLock, Mutex};
 #[derive(Serialize, Deserialize)]
 pub struct Configuration {
     pub can_devices: Vec<CanDevice>,
+    #[serde(default)]
+    pub adc_channels: Vec<AdcChannel>,
     #[serde(skip)]
     nvs: Option<EspDefaultNvs>,
 }
@@ -14,6 +17,7 @@ pub struct Configuration {
 pub static CONFIGURATION: LazyLock<Mutex<Configuration>> = LazyLock::new(|| {
     Mutex::new(Configuration {
         can_devices: vec![],
+        adc_channels: vec![],
         nvs: None,
     })
 });
@@ -49,6 +53,7 @@ impl Configuration {
         let config: Configuration = serde_json::from_str(json)?;
         let mut guard = CONFIGURATION.lock().unwrap();
         guard.can_devices = config.can_devices;
+        guard.adc_channels = config.adc_channels;
         Ok(())
     }
 
