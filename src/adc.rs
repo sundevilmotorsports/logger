@@ -12,24 +12,30 @@ pub type AdcBusType = AdcBus<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>;
 pub static LATEST_ADC: LazyLock<Mutex<HashMap<u8, u16>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdcChannel {
     pub name: String,
     pub channel: u8,
-    #[serde(default = "default_scale")]
-    pub scale: f32,
+    /// `Some` logs `scale * (raw - offset)` as a float; `None` logs the raw
+    /// 12-bit count as 2 bytes, same as a channel with no `processing` fn
+    /// in the C++ logger.
+    #[serde(default)]
+    pub scale: Option<f32>,
     #[serde(default)]
     pub offset: f32,
 }
 
-fn default_scale() -> f32 {
-    1.0
+pub enum AdcValue {
+    Raw(u16),
+    Float(f32),
 }
 
 impl AdcChannel {
-    pub fn apply(&self, raw: u16) -> f32 {
-        self.scale * (raw as f32 - self.offset)
+    pub fn value(&self, raw: u16) -> AdcValue {
+        match self.scale {
+            Some(scale) => AdcValue::Float(scale * (raw as f32 - self.offset)),
+            None => AdcValue::Raw(raw),
+        }
     }
 }
 

@@ -1,31 +1,35 @@
-use crate::adc::{AdcChannel, LATEST_ADC};
-use crate::can::{Signals, LATEST_FRAMES};
+use crate::adc::{AdcChannel, AdcValue, LATEST_ADC};
+use crate::can::{Signal, SignalValue, Signals, LATEST_SIGNALS};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::LATEST_FIX;
 use crate::sd_fake::SD;
 use embassy_time::Timer;
-use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-/// Whether `log_task` is currently writing rows. Toggled remotely via the
-/// `set_logging` serial command; the timer keeps ticking either way so a
-/// resume takes effect on the next 50ms tick.
+/// Whether `log_task` writes rows; toggled via the `set_logging` command.
 pub static ACTIVE: AtomicBool = AtomicBool::new(true);
 
-fn signal_columns() -> Vec<String> {
+/// Header: [1] num_columns, then per column [1] name_len, [name_len] name,
+/// [1] type tag (0 = 4-byte float, N>0 = N raw bytes). Rows: fixed-width,
+/// back to back, in the same column order.
+enum ColType {
+    Float,
+    Raw(u8),
+}
+
+fn configured_can_signals() -> Vec<Signal> {
     CONFIGURATION
         .lock()
         .unwrap()
         .can_devices
         .iter()
-        .flat_map(|dev| -> Vec<String> {
+        .flat_map(|dev| -> Vec<Signal> {
             match &dev.signals {
-                Signals::Fixed(sigs) => sigs.iter().map(|s| s.name.clone()).collect(),
-                Signals::Muxed { groups, .. } => groups
-                    .iter()
-                    .flat_map(|g| g.signals.iter().map(|s| s.name.clone()))
-                    .collect(),
+                Signals::Fixed(sigs) => sigs.clone(),
+                Signals::Muxed { groups, .. } => {
+                    groups.iter().flat_map(|g| g.signals.clone()).collect()
+                }
             }
         })
         .collect()
@@ -35,68 +39,114 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().unwrap().adc_channels.clone()
 }
 
-fn write_hex(mut sink: impl Write, bytes: &[u8]) -> io::Result<()> {
-    for b in bytes {
-        write!(sink, "{b:02x}")?;
+fn write_schema(
+    mut sink: impl Write,
+    can_signals: &[Signal],
+    adc_channels: &[AdcChannel],
+) -> io::Result<()> {
+    let mut body = Vec::new();
+    let mut num_cols: u8 = 0;
+
+    let mut append = |name: &str, ty: ColType| {
+        let tag = match ty {
+            ColType::Float => 0u8,
+            ColType::Raw(n) => n,
+        };
+        body.push(name.len() as u8);
+        body.extend_from_slice(name.as_bytes());
+        body.push(tag);
+        num_cols += 1;
+    };
+    let col_type = |scale: Option<f32>, raw_width: u8| {
+        if scale.is_some() {
+            ColType::Float
+        } else {
+            ColType::Raw(raw_width)
+        }
+    };
+
+    append("timestamp", ColType::Raw(8));
+    for sig in can_signals {
+        append(&sig.name, col_type(sig.scale, sig.len as u8));
     }
-    Ok(())
+    for ch in adc_channels {
+        append(&ch.name, col_type(ch.scale, 2));
+    }
+    append("lat", ColType::Float);
+    append("lon", ColType::Float);
+    append("alt", ColType::Float);
+    append("sats", ColType::Raw(1));
+    append("quality", ColType::Raw(1));
+
+    sink.write_all(&[num_cols])?;
+    sink.write_all(&body)
 }
 
-fn write_row(mut sink: impl Write, columns: &[String], adc_channels: &[AdcChannel]) -> io::Result<()> {
-    write!(sink, "{}", embassy_time::Instant::now().as_millis())?;
+fn write_row(
+    mut sink: impl Write,
+    can_signals: &[Signal],
+    adc_channels: &[AdcChannel],
+) -> io::Result<()> {
+    let ts = embassy_time::Instant::now().as_millis();
+    sink.write_all(&ts.to_le_bytes())?;
 
-    let frames = LATEST_FRAMES.lock().unwrap();
-    let signals: HashMap<&str, &[u8]> = frames
-        .values()
-        .flat_map(|f| &f.signals)
-        .map(|s| (s.name.as_str(), s.bytes.as_slice()))
-        .collect();
-    for name in columns {
-        write!(sink, ",")?;
-        if let Some(bytes) = signals.get(name.as_str()) {
-            write_hex(&mut sink, bytes)?;
+    let signals = LATEST_SIGNALS.lock().unwrap();
+    for sig in can_signals {
+        let raw = signals.get(&sig.name).map(Vec::as_slice);
+        match sig.value(raw) {
+            SignalValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
+            SignalValue::Raw(bytes) => sink.write_all(&bytes)?,
         }
     }
-    drop(frames);
-
-    match &*LATEST_FIX.lock().unwrap() {
-        Some(fix) => write!(
-            sink,
-            ",{},{},{},{},{}",
-            fix.lat, fix.lon, fix.alt_m, fix.sats, fix.quality
-        )?,
-        None => write!(sink, ",,,,,")?, // lat, lon, alt, sats, quality
-    }
+    drop(signals);
 
     let adc = LATEST_ADC.lock().unwrap();
     for ch in adc_channels {
-        write!(sink, ",")?;
-        if let Some(&raw) = adc.get(&ch.channel) {
-            write!(sink, "{}", ch.apply(raw))?;
+        let raw = adc.get(&ch.channel).copied().unwrap_or(0);
+        match ch.value(raw) {
+            AdcValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
+            AdcValue::Raw(v) => sink.write_all(&v.to_le_bytes())?,
         }
     }
     drop(adc);
 
-    writeln!(sink)
+    match &*LATEST_FIX.lock().unwrap() {
+        Some(fix) => {
+            sink.write_all(&(fix.lat as f32).to_le_bytes())?;
+            sink.write_all(&(fix.lon as f32).to_le_bytes())?;
+            sink.write_all(&(fix.alt_m as f32).to_le_bytes())?;
+            sink.write_all(&[fix.sats])?;
+            sink.write_all(&[fix.quality])?;
+        }
+        None => {
+            sink.write_all(&0.0f32.to_le_bytes())?;
+            sink.write_all(&0.0f32.to_le_bytes())?;
+            sink.write_all(&0.0f32.to_le_bytes())?;
+            sink.write_all(&[0u8, 0u8])?;
+        }
+    }
+
+    Ok(())
 }
 
 #[embassy_executor::task]
 pub async fn log_task() {
-    let columns = signal_columns();
+    let can_signals = configured_can_signals();
     let adc_channels = configured_adc_channels();
-    let adc_names: Vec<&str> = adc_channels.iter().map(|c| c.name.as_str()).collect();
-    if let Err(e) = writeln!(
-        SD.lock().unwrap(),
-        "timestamp,{},lat,lon,alt,sats,quality,{}",
-        columns.join(","),
-        adc_names.join(","),
-    ) {
-        log::error!("failed to write log header: {e}");
-    }
+
+    // Empty so the schema is (re)written on the first tick and after every `next_log`.
+    let mut current_name = String::new();
 
     loop {
         if ACTIVE.load(Ordering::Relaxed) {
-            if let Err(e) = write_row(&mut *SD.lock().unwrap(), &columns, &adc_channels) {
+            let mut sd = SD.lock().unwrap();
+            if sd.current_name() != current_name {
+                if let Err(e) = write_schema(&mut *sd, &can_signals, &adc_channels) {
+                    log::error!("failed to write log schema: {e}");
+                }
+                current_name = sd.current_name();
+            }
+            if let Err(e) = write_row(&mut *sd, &can_signals, &adc_channels) {
                 log::warn!("failed to write log row: {e}");
             }
         }

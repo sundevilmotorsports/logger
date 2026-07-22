@@ -55,6 +55,15 @@ pub async fn serial_task() {
     }
 }
 
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
 fn handle_command(payload: &str) -> String {
     let ok =
         |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
@@ -91,21 +100,10 @@ fn handle_command(payload: &str) -> String {
 
         Command::Frames => {
             let snapshot: Vec<_> = {
-                let frames = can::LATEST_FRAMES.lock().unwrap();
-                frames
+                let signals = can::LATEST_SIGNALS.lock().unwrap();
+                signals
                     .iter()
-                    .map(|(id, frame)| {
-                        let signals: Vec<_> = frame
-                            .signals
-                            .iter()
-                            .map(|s| serde_json::json!({"name": s.name, "bytes": s.bytes}))
-                            .collect();
-                        serde_json::json!({
-                            "id": format!("0x{id:03x}"),
-                            "fd": frame.fd,
-                            "signals": signals,
-                        })
-                    })
+                    .map(|(name, bytes)| serde_json::json!({"name": name, "bytes": bytes}))
                     .collect()
             };
             ok(serde_json::json!(snapshot))
@@ -134,8 +132,9 @@ fn handle_command(payload: &str) -> String {
         Command::LogChunk { name, offset } => {
             let sd = sd_fake::SD.lock().unwrap();
             match sd.read_chunk(&name, offset, LOG_CHUNK_LEN) {
+                // Hex-encoded since the log is binary now, not ASCII.
                 Some(chunk) => ok(serde_json::json!({
-                    "data": String::from_utf8_lossy(chunk),
+                    "data": hex_encode(chunk),
                     "eof": chunk.len() < LOG_CHUNK_LEN,
                 })),
                 None => err(format!("no such log: {name}")),

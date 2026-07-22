@@ -1,9 +1,11 @@
+use crate::bootloader;
 use esp_idf_svc::sys::{
-    cdcacm_event_t, cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED, esp, esp_restart,
-    tinyusb_cdcacm_itf_t, tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0, tinyusb_cdcacm_read,
-    tinyusb_cdcacm_write_flush, tinyusb_cdcacm_write_queue, tinyusb_config_cdcacm_t,
-    tinyusb_config_t, tinyusb_driver_install, tusb_cdc_acm_init, EspError, TickType_t,
+    cdcacm_event_t, cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED, esp, tinyusb_cdcacm_itf_t,
+    tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0, tinyusb_cdcacm_read, tinyusb_cdcacm_write_flush,
+    tinyusb_cdcacm_write_queue, tinyusb_config_cdcacm_t, tinyusb_config_t, tinyusb_driver_install,
+    tusb_cdc_acm_init, EspError, TickType_t,
 };
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const CDC_ACM_0: tinyusb_cdcacm_itf_t = tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0;
 
@@ -36,22 +38,37 @@ impl UsbHsCdc {
         Ok(n)
     }
 
+    /// `tinyusb_cdcacm_write_queue` only queues as many bytes as fit in the
+    /// TX FIFO (512 by default)
     pub fn write(&mut self, bytes: &[u8], timeout_ticks: TickType_t) -> Result<usize, EspError> {
-        let n = unsafe { tinyusb_cdcacm_write_queue(CDC_ACM_0, bytes.as_ptr(), bytes.len()) };
-        esp!(unsafe { tinyusb_cdcacm_write_flush(CDC_ACM_0, timeout_ticks) })?;
-        Ok(n)
+        let mut sent = 0;
+        while sent < bytes.len() {
+            let n = unsafe {
+                tinyusb_cdcacm_write_queue(CDC_ACM_0, bytes[sent..].as_ptr(), bytes.len() - sent)
+            };
+            esp!(unsafe { tinyusb_cdcacm_write_flush(CDC_ACM_0, timeout_ticks) })?;
+            if n == 0 {
+                break; // host isn't draining; avoid spinning forever
+            }
+            sent += n;
+        }
+        Ok(sent)
     }
 }
 
-/// Reboots on espflash's DTR+RTS-low bootloader-reset signal, since this
-/// port has no hardware reset circuit. Unverified on real hardware.
+static SAW_RESET_PULSE: AtomicBool = AtomicBool::new(false);
+
+/// Might work
 extern "C" fn reset_on_bootloader_request(_itf: core::ffi::c_int, event: *mut cdcacm_event_t) {
     let event = unsafe { &*event };
     if event.type_ != cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED {
         return;
     }
     let state = unsafe { event.__bindgen_anon_1.line_state_changed_data };
-    if !state.dtr && !state.rts {
-        unsafe { esp_restart() };
+
+    if state.dtr && state.rts {
+        SAW_RESET_PULSE.store(true, Ordering::Relaxed);
+    } else if !state.dtr && !state.rts && SAW_RESET_PULSE.swap(false, Ordering::Relaxed) {
+        bootloader::reboot_to_bootloader();
     }
 }

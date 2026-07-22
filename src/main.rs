@@ -1,4 +1,5 @@
 mod adc;
+mod bootloader;
 mod can;
 mod configuration;
 mod gnss;

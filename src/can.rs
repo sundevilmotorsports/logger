@@ -1,4 +1,3 @@
-use embassy_time::Timer;
 use embedded_hal::{delay::DelayNs, spi::SpiDevice};
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
@@ -18,11 +17,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, LazyLock, Mutex};
 
-// CAN and ADC share one physical SPI2 bus (SPI1 isn't available for general
-// use on this chip), each on its own CS line -> the bus handle is shared.
 pub type CanBusType = CanBus<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>;
 
-pub static LATEST_FRAMES: LazyLock<Mutex<HashMap<u32, ParsedFrame>>> =
+pub static LATEST_SIGNALS: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 #[embassy_executor::task]
@@ -30,11 +27,22 @@ pub async fn can_poll_task(mut int_pin: PinDriver<'static, Input>, bus: Arc<Mute
     loop {
         int_pin.wait_for_falling_edge().await.ok();
 
-        let mut guard = bus.lock().unwrap();
-        if let Err(e) = guard.poll_once() {
-            log::warn!("CAN poll error: {:?}", e);
+        let updates = {
+            let mut guard = bus.lock().unwrap();
+            match guard.poll_once() {
+                Ok(updates) => updates,
+                Err(e) => {
+                    log::warn!("CAN poll error: {:?}", e);
+                    continue;
+                }
+            }
+        };
+        if !updates.is_empty() {
+            let mut latest = LATEST_SIGNALS.lock().unwrap();
+            for (name, bytes) in updates {
+                latest.insert(name, bytes);
+            }
         }
-        *LATEST_FRAMES.lock().unwrap() = guard.all_frames().clone();
     }
 }
 
@@ -43,6 +51,67 @@ pub struct Signal {
     pub name: String,
     pub start: usize,
     pub len: usize,
+    /// Used only when `scale` is set, to decode the raw integer.
+    #[serde(default)]
+    pub signed: bool,
+    #[serde(default)]
+    pub big_endian: bool,
+    /// `Some` logs `scale * (raw - offset)` as a float; `None` logs the raw
+    /// bytes verbatim, same as a signal with no `processing` fn in the C++ logger.
+    #[serde(default)]
+    pub scale: Option<f32>,
+    #[serde(default)]
+    pub offset: f32,
+}
+
+pub enum SignalValue {
+    Raw(Vec<u8>),
+    Float(f32),
+}
+
+impl Signal {
+    pub fn value(&self, raw: Option<&[u8]>) -> SignalValue {
+        match self.scale {
+            Some(scale) => {
+                let n = raw.map(|r| self.raw_int(r)).unwrap_or(0);
+                SignalValue::Float(scale * (n as f32 - self.offset))
+            }
+            None => {
+                let mut buf = vec![0u8; self.len];
+                if let Some(r) = raw {
+                    let n = r.len().min(self.len);
+                    buf[..n].copy_from_slice(&r[..n]);
+                }
+                SignalValue::Raw(buf)
+            }
+        }
+    }
+
+    fn raw_int(&self, raw: &[u8]) -> i64 {
+        macro_rules! read {
+            ($u:ty, $i:ty) => {{
+                let mut buf = [0u8; std::mem::size_of::<$u>()];
+                let n = raw.len().min(buf.len());
+                buf[..n].copy_from_slice(&raw[..n]);
+                let v = if self.big_endian {
+                    <$u>::from_be_bytes(buf)
+                } else {
+                    <$u>::from_le_bytes(buf)
+                };
+                if self.signed {
+                    v as $i as i64
+                } else {
+                    v as i64
+                }
+            }};
+        }
+        match self.len {
+            1 => read!(u8, i8),
+            2 => read!(u16, i16),
+            4 => read!(u32, i32),
+            _ => read!(u64, i64),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -70,24 +139,9 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-#[derive(Clone)]
-pub struct ParsedSignal {
-    pub name: String,
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Clone)]
-pub struct ParsedFrame {
-    pub id: u32,
-    pub extended: bool,
-    pub fd: bool,
-    pub signals: Vec<ParsedSignal>,
-}
-
 pub struct CanBus<SPI> {
     controller: MCP2518FD<SPI>,
     devices: Vec<CanDevice>,
-    latest: HashMap<u32, ParsedFrame>,
 }
 
 impl<SPI: SpiDevice> CanBus<SPI> {
@@ -155,7 +209,6 @@ impl<SPI: SpiDevice> CanBus<SPI> {
         Ok(Self {
             controller,
             devices: Vec::new(),
-            latest: HashMap::new(),
         })
     }
 
@@ -163,14 +216,10 @@ impl<SPI: SpiDevice> CanBus<SPI> {
         self.devices.push(device);
     }
 
-    /// Latest received frame for every registered device, keyed by CAN ID.
-    pub fn all_frames(&self) -> &HashMap<u32, ParsedFrame> {
-        &self.latest
-    }
-
-    /// Drains all frames currently in the FIFO and updates `all_frames`.
-    /// Unrecognized IDs are consumed and discarded so the FIFO never backs up.
-    pub fn poll_once(&mut self) -> Result<(), Error> {
+    /// Drains the FIFO, returning every (signal name, raw bytes) update.
+    /// Unrecognized IDs are discarded so the FIFO never backs up.
+    pub fn poll_once(&mut self) -> Result<Vec<(String, Vec<u8>)>, Error> {
+        let mut updates = Vec::new();
         loop {
             let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? else {
                 break;
@@ -179,61 +228,40 @@ impl<SPI: SpiDevice> CanBus<SPI> {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
-            if let Some(frame) = self.build_frame(raw_id, extended, msg.is_fd(), msg.data()) {
-                self.latest.insert(raw_id, frame);
-            }
+            self.collect_updates(raw_id, extended, msg.data(), &mut updates);
         }
-        Ok(())
+        Ok(updates)
     }
 
-    /// Pops one frame and returns it, or None if the FIFO is empty or the ID is unregistered.
-    pub fn receive(&mut self) -> Result<Option<ParsedFrame>, Error> {
-        let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? else {
-            return Ok(None);
-        };
-        let (raw_id, extended) = match msg.id() {
-            Id::Standard(id) => (id.as_raw() as u32, false),
-            Id::Extended(id) => (id.as_raw(), true),
-        };
-        Ok(self.build_frame(raw_id, extended, msg.is_fd(), msg.data()))
-    }
-
-    fn build_frame(
+    fn collect_updates(
         &self,
         raw_id: u32,
         extended: bool,
-        fd: bool,
         data: &[u8],
-    ) -> Option<ParsedFrame> {
-        let device = self
+        out: &mut Vec<(String, Vec<u8>)>,
+    ) {
+        let Some(device) = self
             .devices
             .iter()
-            .find(|d| d.id == raw_id && d.extended == extended)?;
+            .find(|d| d.id == raw_id && d.extended == extended)
+        else {
+            return;
+        };
         let active_signals: &[Signal] = match &device.signals {
             Signals::Fixed(sigs) => sigs,
             Signals::Muxed { byte, groups } => {
                 let type_val = *data.get(*byte).unwrap_or(&0);
-                groups
-                    .iter()
-                    .find(|g| g.type_val == type_val)
-                    .map(|g| g.signals.as_slice())
-                    .unwrap_or(&[])
+                match groups.iter().find(|g| g.type_val == type_val) {
+                    Some(g) => &g.signals,
+                    None => return,
+                }
             }
         };
-        let signals = active_signals
-            .iter()
-            .filter(|s| s.start + s.len <= data.len())
-            .map(|s| ParsedSignal {
-                name: s.name.clone(),
-                bytes: data[s.start..s.start + s.len].to_vec(),
-            })
-            .collect();
-        Some(ParsedFrame {
-            id: raw_id,
-            extended,
-            fd,
-            signals,
-        })
+        for sig in active_signals {
+            if sig.start + sig.len <= data.len() {
+                out.push((sig.name.clone(), data[sig.start..sig.start + sig.len].to_vec()));
+            }
+        }
     }
 
     /// Verifies the TX/RX path using the controller's internal loopback mode:
