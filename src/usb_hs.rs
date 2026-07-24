@@ -69,6 +69,6 @@ extern "C" fn reset_on_bootloader_request(_itf: core::ffi::c_int, event: *mut cd
     if state.dtr && state.rts {
         SAW_RESET_PULSE.store(true, Ordering::Relaxed);
     } else if !state.dtr && !state.rts && SAW_RESET_PULSE.swap(false, Ordering::Relaxed) {
-        bootloader::reboot_to_bootloader();
+        bootloader::REQUESTED.store(true, Ordering::Relaxed);
     }
 }

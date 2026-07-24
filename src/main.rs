@@ -112,5 +112,6 @@ fn main() {
         spawner.spawn(serial_task().expect("serial_task"));
         spawner.spawn(adc::adc_poll_task(adc_bus).expect("adc_poll_task"));
         spawner.spawn(logging::log_task().expect("log_task"));
+        spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
     });
 }
