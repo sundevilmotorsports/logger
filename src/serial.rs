@@ -1,6 +1,7 @@
+use crate::configuration::{Configuration, CONFIGURATION};
+use crate::imu::LATEST_IMU;
 use crate::usb_hs::UsbHsCdc;
 use crate::{can, gnss, logging, sd_fake};
-use crate::configuration::{Configuration, CONFIGURATION};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Timer;
@@ -34,6 +35,7 @@ enum Command {
     Frames,
     Uptime,
     Gps,
+    Imu,
     ListLogs,
     LogChunk { name: String, offset: u64 },
     LogStatus,
@@ -120,6 +122,11 @@ fn handle_command(payload: &str) -> String {
         Command::Gps => match &*gnss::LATEST_FIX.lock().unwrap() {
             Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
             None => err("no fix".into()),
+        },
+
+        Command::Imu => match &*LATEST_IMU.lock().unwrap() {
+            Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
+            None => err("no imu".into()),
         },
 
         Command::ListLogs => {

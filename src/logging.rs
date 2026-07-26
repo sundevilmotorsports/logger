@@ -2,6 +2,7 @@ use crate::adc::{AdcChannel, AdcValue, LATEST_ADC};
 use crate::can::{Signal, SignalValue, Signals, LATEST_SIGNALS};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::LATEST_FIX;
+use crate::imu::LATEST_IMU;
 use crate::sd_fake::SD;
 use embassy_time::Timer;
 use std::io::{self, Write};
@@ -72,6 +73,9 @@ fn write_schema(
     for ch in adc_channels {
         append(&ch.name, col_type(ch.scale, 2));
     }
+    for name in ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp"] {
+        append(name, ColType::Float);
+    }
     append("lat", ColType::Float);
     append("lon", ColType::Float);
     append("alt", ColType::Float);
@@ -109,6 +113,16 @@ fn write_row(
         }
     }
     drop(adc);
+
+    let imu = *LATEST_IMU.lock().unwrap();
+    let reading = imu.unwrap_or_default();
+    for v in reading.accel_g {
+        sink.write_all(&v.to_le_bytes())?;
+    }
+    for v in reading.gyro_dps {
+        sink.write_all(&v.to_le_bytes())?;
+    }
+    sink.write_all(&reading.temp_c.to_le_bytes())?;
 
     match &*LATEST_FIX.lock().unwrap() {
         Some(fix) => {

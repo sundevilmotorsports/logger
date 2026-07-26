@@ -3,6 +3,7 @@ mod bootloader;
 mod can;
 mod configuration;
 mod gnss;
+mod imu;
 mod logging;
 mod sd;
 mod sd_fake;
@@ -13,6 +14,7 @@ use can::{can_poll_task, CanBusType};
 use configuration::Configuration;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{AnyIOPin, AnyInputPin, PinDriver, Pull};
+use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::config::Config as SpiConfig;
@@ -62,10 +64,13 @@ fn main() {
     )
     .expect("SPI driver init failed");
     let spi = Arc::new(spi);
-    let spi_device =
-        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio34), &SpiConfig::new())
-            .expect("SPI device init failed");
-    
+    let spi_device = SpiDeviceDriver::new(
+        spi.clone(),
+        Some(peripherals.pins.gpio34),
+        &SpiConfig::new(),
+    )
+    .expect("SPI device init failed");
+
     let mut delay = FreeRtos;
     let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
     match bus.self_test(&mut delay) {
@@ -90,18 +95,30 @@ fn main() {
     )
     .expect("GNSS UART init failed");
     gnss::spawn_reader(gnss_uart);
-    
+
     let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
     serial::spawn_reader(usb_hs);
 
     // TODO: placeholder
-    let adc_spi_device =
-        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio26), &SpiConfig::new())
-            .expect("ADC SPI device init failed");
+    let adc_spi_device = SpiDeviceDriver::new(
+        spi.clone(),
+        Some(peripherals.pins.gpio26),
+        &SpiConfig::new(),
+    )
+    .expect("ADC SPI device init failed");
     let adc_bus: Arc<Mutex<adc::AdcBusType>> = Arc::new(Mutex::new(adc::AdcBus::new(
         adc_spi_device,
         adc::Range::R5V,
     )));
+
+    let i2c = I2cDriver::new(
+        peripherals.i2c0,
+        peripherals.pins.gpio2, // SDA
+        peripherals.pins.gpio3, // SCL
+        &I2cConfig::new(),
+    )
+    .expect("I2C driver init failed");
+    let imu_bus = imu::ImuBus::new(i2c).expect("IMU init failed");
 
     // let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
 
@@ -111,6 +128,7 @@ fn main() {
         // spawner.spawn(can_poll_task(int_pin, bus).expect("can_poll_task"));
         spawner.spawn(serial_task().expect("serial_task"));
         spawner.spawn(adc::adc_poll_task(adc_bus).expect("adc_poll_task"));
+        spawner.spawn(imu::imu_poll_task(imu_bus).expect("imu_poll_task"));
         spawner.spawn(logging::log_task().expect("log_task"));
         spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
     });
