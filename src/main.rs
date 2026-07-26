@@ -39,20 +39,14 @@ fn main() {
     let p = Peripherals::take().expect("failed to take peripherals");
     let state = Arc::new(SensorState::default());
 
-    // Real SD hardware is dead (CMD/CLK nets open on the board) -> sd_fake::SD
-    // (an in-memory fake) stands in until it's fixed. Swap back to a
-    // `sd::SdCard::new(p.sdmmc0, ...)` call then.
+    // Real SD hardware is dead
 
-    // TODO: use correct pins. SPI1 isn't usable for general peripherals on
-    // this chip, so CAN and ADC share this one SPI2 bus via separate CS pins.
     let spi = init_spi_bus(p.spi2, p.pins.gpio30, p.pins.gpio29, p.pins.gpio31);
 
     init_can(spi.clone(), p.pins.gpio34);
-    // TODO: once CAN device config is loaded, register devices and spawn
-    // can_poll_task with an interrupt pin (see can::can_poll_task).
 
-    let adc_bus = Arc::new(Mutex::new(init_adc(spi.clone(), p.pins.gpio26))); // TODO: placeholder CS pin
-    let imu_bus = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3); // TODO: placeholder SDA/SCL pins
+    let adc_bus = Arc::new(Mutex::new(init_adc(spi.clone(), p.pins.gpio27))); // TODO: Check spi
+    let imu_bus = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3);
 
     init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32, state.clone());
 
