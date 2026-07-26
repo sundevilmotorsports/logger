@@ -73,7 +73,10 @@ fn write_schema(
     for ch in adc_channels {
         append(&ch.name, col_type(ch.scale, 2));
     }
-    for name in ["accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp"] {
+    for name in [
+        "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp", "mag_x",
+        "mag_y", "mag_z",
+    ] {
         append(name, ColType::Float);
     }
     append("lat", ColType::Float);
@@ -123,6 +126,9 @@ fn write_row(
         sink.write_all(&v.to_le_bytes())?;
     }
     sink.write_all(&reading.temp_c.to_le_bytes())?;
+    for v in reading.mag_ut {
+        sink.write_all(&v.to_le_bytes())?;
+    }
 
     match &*LATEST_FIX.lock().unwrap() {
         Some(fix) => {
