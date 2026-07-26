@@ -1,11 +1,11 @@
 use crate::bootloader;
 use esp_idf_svc::sys::{
-    cdcacm_event_t, cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED, esp, tinyusb_cdcacm_itf_t,
-    tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0, tinyusb_cdcacm_read, tinyusb_cdcacm_write_flush,
-    tinyusb_cdcacm_write_queue, tinyusb_config_cdcacm_t, tinyusb_config_t, tinyusb_driver_install,
-    tusb_cdc_acm_init, EspError, TickType_t,
+    cdcacm_event_t, cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED, esp, esp_timer_get_time,
+    tinyusb_cdcacm_itf_t, tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0, tinyusb_cdcacm_read,
+    tinyusb_cdcacm_write_flush, tinyusb_cdcacm_write_queue, tinyusb_config_cdcacm_t,
+    tinyusb_config_t, tinyusb_driver_install, tusb_cdc_acm_init, EspError, TickType_t,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 const CDC_ACM_0: tinyusb_cdcacm_itf_t = tinyusb_cdcacm_itf_t_TINYUSB_CDC_ACM_0;
 
@@ -57,18 +57,24 @@ impl UsbHsCdc {
 }
 
 static SAW_RESET_PULSE: AtomicBool = AtomicBool::new(false);
+static PULSE_ARMED_AT_MS: AtomicI32 = AtomicI32::new(0);
+const RESET_PULSE_WINDOW_MS: i32 = 500;
 
-/// Might work
 extern "C" fn reset_on_bootloader_request(_itf: core::ffi::c_int, event: *mut cdcacm_event_t) {
     let event = unsafe { &*event };
     if event.type_ != cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED {
         return;
     }
     let state = unsafe { event.__bindgen_anon_1.line_state_changed_data };
+    let now_ms = (unsafe { esp_timer_get_time() } / 1_000) as i32;
 
     if state.dtr && state.rts {
         SAW_RESET_PULSE.store(true, Ordering::Relaxed);
+        PULSE_ARMED_AT_MS.store(now_ms, Ordering::Relaxed);
     } else if !state.dtr && !state.rts && SAW_RESET_PULSE.swap(false, Ordering::Relaxed) {
-        bootloader::REQUESTED.store(true, Ordering::Relaxed);
+        let armed_at = PULSE_ARMED_AT_MS.load(Ordering::Relaxed);
+        if now_ms.wrapping_sub(armed_at) < RESET_PULSE_WINDOW_MS {
+            bootloader::REQUESTED.store(true, Ordering::Relaxed);
+        }
     }
 }

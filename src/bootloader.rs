@@ -1,6 +1,6 @@
+use embassy_time::Timer;
 use esp_idf_svc::sys::esp_restart;
 use std::sync::atomic::{AtomicBool, Ordering};
-use embassy_time::Timer;
 
 const LP_SYSTEM_REG_SYS_CTRL_REG: *mut u32 = 0x5011_0008 as *mut u32;
 const FORCE_DOWNLOAD_BOOT: u32 = 1 << 2;
