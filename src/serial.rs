@@ -27,6 +27,7 @@ static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
 #[serde(tag = "cmd", rename_all = "snake_case")]
 enum Command {
     Ping,
+    Version,
     Status,
     GetConfig,
     SetConfig { args: Configuration },
@@ -76,6 +77,8 @@ fn handle_command(payload: &str) -> String {
 
     match cmd {
         Command::Ping => ok(serde_json::json!("pong")),
+
+        Command::Version => ok(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
 
         Command::Status => {
             let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();

@@ -94,9 +94,9 @@ fn main() {
     let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
     serial::spawn_reader(usb_hs);
 
-    // ADC is a TI ADS7951 (12-bit, 8ch) on the shared SPI2 bus, own CS pin.
-    let adc_spi_device = // TODO: correct CS pin
-        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio25), &SpiConfig::new())
+    // TODO: placeholder
+    let adc_spi_device =
+        SpiDeviceDriver::new(spi.clone(), Some(peripherals.pins.gpio26), &SpiConfig::new())
             .expect("ADC SPI device init failed");
     let adc_bus: Arc<Mutex<adc::AdcBusType>> = Arc::new(Mutex::new(adc::AdcBus::new(
         adc_spi_device,
