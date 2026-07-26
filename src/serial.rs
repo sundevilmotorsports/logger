@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, CONFIGURATION};
-use crate::imu::LATEST_IMU;
+use crate::state::SensorState;
 use crate::usb_hs::UsbHsCdc;
-use crate::{can, gnss, logging, sd_fake};
+use crate::{logging, sd_fake};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::Timer;
@@ -10,6 +10,7 @@ use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
 use esp_idf_svc::systime::EspSystemTime;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 const MAX_PAYLOAD: usize = 16 * 1024;
 
@@ -45,10 +46,10 @@ enum Command {
 }
 
 #[embassy_executor::task]
-pub async fn serial_task() {
+pub async fn serial_task(state: Arc<SensorState>) {
     loop {
         let payload = COMMAND_CHANNEL.receive().await;
-        let response = handle_command(&payload);
+        let response = handle_command(&payload, &state);
         RESPONSE_CHANNEL.send(response).await;
 
         if REBOOT_REQUESTED.load(Ordering::Relaxed) {
@@ -67,7 +68,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn handle_command(payload: &str) -> String {
+fn handle_command(payload: &str, state: &SensorState) -> String {
     let ok =
         |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
     let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
@@ -105,7 +106,7 @@ fn handle_command(payload: &str) -> String {
 
         Command::Frames => {
             let snapshot: Vec<_> = {
-                let signals = can::LATEST_SIGNALS.lock().unwrap();
+                let signals = state.can_signals.lock().unwrap();
                 signals
                     .iter()
                     .map(|(name, bytes)| serde_json::json!({"name": name, "bytes": bytes}))
@@ -119,12 +120,12 @@ fn handle_command(payload: &str) -> String {
             ok(serde_json::json!({ "uptime_seconds": time }))
         }
 
-        Command::Gps => match &*gnss::LATEST_FIX.lock().unwrap() {
+        Command::Gps => match &*state.gps.lock().unwrap() {
             Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
             None => err("no fix".into()),
         },
 
-        Command::Imu => match &*LATEST_IMU.lock().unwrap() {
+        Command::Imu => match &*state.imu.lock().unwrap() {
             Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
             None => err("no imu".into()),
         },

@@ -1,12 +1,15 @@
-use crate::adc::{AdcChannel, AdcValue, LATEST_ADC};
-use crate::can::{Signal, SignalValue, Signals, LATEST_SIGNALS};
+use crate::adc::{AdcChannel, AdcValue};
+use crate::can::{Signal, SignalValue, Signals};
 use crate::configuration::CONFIGURATION;
-use crate::gnss::LATEST_FIX;
-use crate::imu::LATEST_IMU;
+use crate::gnss::Fix;
+use crate::imu::ImuReading;
 use crate::sd_fake::SD;
+use crate::state::SensorState;
 use embassy_time::Timer;
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 /// Whether `log_task` writes rows; toggled via the `set_logging` command.
 pub static ACTIVE: AtomicBool = AtomicBool::new(true);
@@ -17,6 +20,118 @@ pub static ACTIVE: AtomicBool = AtomicBool::new(true);
 enum ColType {
     Float,
     Raw(u8),
+}
+
+fn col_type(scale: Option<f32>, raw_width: u8) -> ColType {
+    if scale.is_some() {
+        ColType::Float
+    } else {
+        ColType::Raw(raw_width)
+    }
+}
+
+trait LogSource {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType));
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()>;
+}
+
+struct CanColumns<'a> {
+    signals: &'a [Signal],
+    latest: HashMap<String, Vec<u8>>,
+}
+
+impl LogSource for CanColumns<'_> {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        for sig in self.signals {
+            push(&sig.name, col_type(sig.scale, sig.len as u8));
+        }
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        for sig in self.signals {
+            let raw = self.latest.get(&sig.name).map(Vec::as_slice);
+            match sig.value(raw) {
+                SignalValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
+                SignalValue::Raw(bytes) => sink.write_all(&bytes)?,
+            }
+        }
+        Ok(())
+    }
+}
+
+struct AdcColumns<'a> {
+    channels: &'a [AdcChannel],
+    latest: HashMap<u8, u16>,
+}
+
+impl LogSource for AdcColumns<'_> {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        for ch in self.channels {
+            push(&ch.name, col_type(ch.scale, 2));
+        }
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        for ch in self.channels {
+            let raw = self.latest.get(&ch.channel).copied().unwrap_or(0);
+            match ch.value(raw) {
+                AdcValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
+                AdcValue::Raw(v) => sink.write_all(&v.to_le_bytes())?,
+            }
+        }
+        Ok(())
+    }
+}
+
+struct ImuColumns(Option<ImuReading>);
+
+impl LogSource for ImuColumns {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        for name in [
+            "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp", "mag_x",
+            "mag_y", "mag_z",
+        ] {
+            push(name, ColType::Float);
+        }
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        let r = self.0.unwrap_or_default();
+        for v in r.accel_g {
+            sink.write_all(&v.to_le_bytes())?;
+        }
+        for v in r.gyro_dps {
+            sink.write_all(&v.to_le_bytes())?;
+        }
+        sink.write_all(&r.temp_c.to_le_bytes())?;
+        for v in r.mag_ut {
+            sink.write_all(&v.to_le_bytes())?;
+        }
+        Ok(())
+    }
+}
+
+struct GpsColumns(Option<Fix>);
+
+impl LogSource for GpsColumns {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        push("lat", ColType::Float);
+        push("lon", ColType::Float);
+        push("alt", ColType::Float);
+        push("sats", ColType::Raw(1));
+        push("quality", ColType::Raw(1));
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        let (lat, lon, alt_m, sats, quality) = match &self.0 {
+            Some(fix) => (fix.lat, fix.lon, fix.alt_m, fix.sats, fix.quality),
+            None => (0.0, 0.0, 0.0, 0, 0),
+        };
+        sink.write_all(&(lat as f32).to_le_bytes())?;
+        sink.write_all(&(lon as f32).to_le_bytes())?;
+        sink.write_all(&(alt_m as f32).to_le_bytes())?;
+        sink.write_all(&[sats, quality])
+    }
 }
 
 fn configured_can_signals() -> Vec<Signal> {
@@ -40,15 +155,29 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().unwrap().adc_channels.clone()
 }
 
-fn write_schema(
-    mut sink: impl Write,
-    can_signals: &[Signal],
-    adc_channels: &[AdcChannel],
-) -> io::Result<()> {
+fn snapshot<'a>(
+    can_signals: &'a [Signal],
+    adc_channels: &'a [AdcChannel],
+    state: &SensorState,
+) -> [Box<dyn LogSource + 'a>; 4] {
+    [
+        Box::new(CanColumns {
+            signals: can_signals,
+            latest: state.can_signals.lock().unwrap().clone(),
+        }),
+        Box::new(AdcColumns {
+            channels: adc_channels,
+            latest: state.adc.lock().unwrap().clone(),
+        }),
+        Box::new(GpsColumns(state.gps.lock().unwrap().clone())),
+        Box::new(ImuColumns(*state.imu.lock().unwrap())),
+    ]
+}
+
+fn write_schema(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
     let mut body = Vec::new();
     let mut num_cols: u8 = 0;
-
-    let mut append = |name: &str, ty: ColType| {
+    let mut push = |name: &str, ty: ColType| {
         let tag = match ty {
             ColType::Float => 0u8,
             ColType::Raw(n) => n,
@@ -58,99 +187,27 @@ fn write_schema(
         body.push(tag);
         num_cols += 1;
     };
-    let col_type = |scale: Option<f32>, raw_width: u8| {
-        if scale.is_some() {
-            ColType::Float
-        } else {
-            ColType::Raw(raw_width)
-        }
-    };
 
-    append("timestamp", ColType::Raw(8));
-    for sig in can_signals {
-        append(&sig.name, col_type(sig.scale, sig.len as u8));
+    push("timestamp", ColType::Raw(8));
+    for src in sources {
+        src.schema(&mut push);
     }
-    for ch in adc_channels {
-        append(&ch.name, col_type(ch.scale, 2));
-    }
-    for name in [
-        "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp", "mag_x",
-        "mag_y", "mag_z",
-    ] {
-        append(name, ColType::Float);
-    }
-    append("lat", ColType::Float);
-    append("lon", ColType::Float);
-    append("alt", ColType::Float);
-    append("sats", ColType::Raw(1));
-    append("quality", ColType::Raw(1));
 
     sink.write_all(&[num_cols])?;
     sink.write_all(&body)
 }
 
-fn write_row(
-    mut sink: impl Write,
-    can_signals: &[Signal],
-    adc_channels: &[AdcChannel],
-) -> io::Result<()> {
+fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
     let ts = embassy_time::Instant::now().as_millis();
     sink.write_all(&ts.to_le_bytes())?;
-
-    let signals = LATEST_SIGNALS.lock().unwrap();
-    for sig in can_signals {
-        let raw = signals.get(&sig.name).map(Vec::as_slice);
-        match sig.value(raw) {
-            SignalValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
-            SignalValue::Raw(bytes) => sink.write_all(&bytes)?,
-        }
+    for src in sources {
+        src.write_row(&mut sink)?;
     }
-    drop(signals);
-
-    let adc = LATEST_ADC.lock().unwrap();
-    for ch in adc_channels {
-        let raw = adc.get(&ch.channel).copied().unwrap_or(0);
-        match ch.value(raw) {
-            AdcValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
-            AdcValue::Raw(v) => sink.write_all(&v.to_le_bytes())?,
-        }
-    }
-    drop(adc);
-
-    let imu = *LATEST_IMU.lock().unwrap();
-    let reading = imu.unwrap_or_default();
-    for v in reading.accel_g {
-        sink.write_all(&v.to_le_bytes())?;
-    }
-    for v in reading.gyro_dps {
-        sink.write_all(&v.to_le_bytes())?;
-    }
-    sink.write_all(&reading.temp_c.to_le_bytes())?;
-    for v in reading.mag_ut {
-        sink.write_all(&v.to_le_bytes())?;
-    }
-
-    match &*LATEST_FIX.lock().unwrap() {
-        Some(fix) => {
-            sink.write_all(&(fix.lat as f32).to_le_bytes())?;
-            sink.write_all(&(fix.lon as f32).to_le_bytes())?;
-            sink.write_all(&(fix.alt_m as f32).to_le_bytes())?;
-            sink.write_all(&[fix.sats])?;
-            sink.write_all(&[fix.quality])?;
-        }
-        None => {
-            sink.write_all(&0.0f32.to_le_bytes())?;
-            sink.write_all(&0.0f32.to_le_bytes())?;
-            sink.write_all(&0.0f32.to_le_bytes())?;
-            sink.write_all(&[0u8, 0u8])?;
-        }
-    }
-
     Ok(())
 }
 
 #[embassy_executor::task]
-pub async fn log_task() {
+pub async fn log_task(state: Arc<SensorState>) {
     let can_signals = configured_can_signals();
     let adc_channels = configured_adc_channels();
 
@@ -159,14 +216,15 @@ pub async fn log_task() {
 
     loop {
         if ACTIVE.load(Ordering::Relaxed) {
+            let sources = snapshot(&can_signals, &adc_channels, &state);
             let mut sd = SD.lock().unwrap();
             if sd.current_name() != current_name {
-                if let Err(e) = write_schema(&mut *sd, &can_signals, &adc_channels) {
+                if let Err(e) = write_schema(&mut *sd, &sources) {
                     log::error!("failed to write log schema: {e}");
                 }
                 current_name = sd.current_name();
             }
-            if let Err(e) = write_row(&mut *sd, &can_signals, &adc_channels) {
+            if let Err(e) = write_row(&mut *sd, &sources) {
                 log::warn!("failed to write log row: {e}");
             }
         }

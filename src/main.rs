@@ -8,22 +8,25 @@ mod logging;
 mod sd;
 mod sd_fake;
 mod serial;
+mod state;
 mod usb_hs;
 
-use can::{can_poll_task, CanBusType};
+use adc::AdcBus;
+use can::CanBus;
 use configuration::Configuration;
 use esp_idf_svc::hal::delay::FreeRtos;
-use esp_idf_svc::hal::gpio::{AnyIOPin, AnyInputPin, PinDriver, Pull};
-use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
+use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
+use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2c as I2cPeripheral, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
-use esp_idf_svc::hal::sd::SdCardConfiguration;
-use esp_idf_svc::hal::spi::config::Config as SpiConfig;
-use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver, SpiDriverConfig};
-use esp_idf_svc::hal::uart::{config as uart_config, UartDriver};
+use esp_idf_svc::hal::spi::{
+    config::Config as SpiConfig, SpiAnyPins, SpiDeviceDriver, SpiDriver, SpiDriverConfig,
+};
+use esp_idf_svc::hal::uart::{config as uart_config, Uart as UartPeripheral, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
+use imu::ImuBus;
 use log::info;
-use sd::SdCard;
 use serial::serial_task;
+use state::SensorState;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
 use usb_hs::UsbHsCdc;
@@ -31,105 +34,101 @@ use usb_hs::UsbHsCdc;
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
+    Configuration::init().expect("config init failed");
 
-    let peripherals = Peripherals::take().expect("failed to take peripherals");
+    let p = Peripherals::take().expect("failed to take peripherals");
+    let state = Arc::new(SensorState::default());
 
     // Real SD hardware is dead (CMD/CLK nets open on the board) -> sd_fake::SD
-    // (an in-memory fake) stands in until it's fixed. Swap back to the block
-    // below then.
-    // let _sd = SdCard::new(
-    //     peripherals.sdmmc0,
-    //     peripherals.pins.gpio44, // cmd
-    //     peripherals.pins.gpio43, // clk
-    //     peripherals.pins.gpio39, // d0
-    //     peripherals.pins.gpio40, // d1
-    //     peripherals.pins.gpio41, // d2
-    //     peripherals.pins.gpio42, // d3
-    //     AnyInputPin::none(),
-    //     AnyInputPin::none(),
-    //     &SdCardConfiguration::default(),
-    // )
-    // .expect("SD card init failed");
-
-    Configuration::init().expect("config init failed");
+    // (an in-memory fake) stands in until it's fixed. Swap back to a
+    // `sd::SdCard::new(p.sdmmc0, ...)` call then.
 
     // TODO: use correct pins. SPI1 isn't usable for general peripherals on
     // this chip, so CAN and ADC share this one SPI2 bus via separate CS pins.
-    let spi = SpiDriver::new(
-        peripherals.spi2,
-        peripherals.pins.gpio30,       // SCK
-        peripherals.pins.gpio29,       // MOSI
-        Some(peripherals.pins.gpio31), // MISO
-        &SpiDriverConfig::new(),
-    )
-    .expect("SPI driver init failed");
-    let spi = Arc::new(spi);
-    let spi_device = SpiDeviceDriver::new(
-        spi.clone(),
-        Some(peripherals.pins.gpio34),
-        &SpiConfig::new(),
-    )
-    .expect("SPI device init failed");
+    let spi = init_spi_bus(p.spi2, p.pins.gpio30, p.pins.gpio29, p.pins.gpio31);
 
-    let mut delay = FreeRtos;
-    let mut bus = can::CanBus::new(spi_device, &mut delay).expect("CAN init failed");
-    match bus.self_test(&mut delay) {
-        Ok(()) => info!("CAN self-test passed"),
-        Err(e) => log::error!("CAN self-test failed: {:?}", e),
-    }
-    //
-    // for device in &*CONFIGURATION.lock().unwrap().can_devices {
-    //     bus.register_can_device(device.clone());
-    // }
-    //
-    // let int_pin = PinDriver::input(peripherals.pins.gpio14, Pull::Up) // TODO: correct INT pin
-    //     .expect("INT pin init failed");
+    init_can(spi.clone(), p.pins.gpio34);
+    // TODO: once CAN device config is loaded, register devices and spawn
+    // can_poll_task with an interrupt pin (see can::can_poll_task).
 
-    let gnss_uart = UartDriver::new(
-        peripherals.uart1,
-        peripherals.pins.gpio33, // TX
-        peripherals.pins.gpio32, // RX
-        Option::<AnyIOPin>::None,
-        Option::<AnyIOPin>::None,
-        &uart_config::Config::new().baudrate(Hertz(38_400)),
-    )
-    .expect("GNSS UART init failed");
-    gnss::spawn_reader(gnss_uart);
+    let adc_bus = Arc::new(Mutex::new(init_adc(spi.clone(), p.pins.gpio26))); // TODO: placeholder CS pin
+    let imu_bus = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3); // TODO: placeholder SDA/SCL pins
+
+    init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32, state.clone());
 
     let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
     serial::spawn_reader(usb_hs);
 
-    // TODO: placeholder
-    let adc_spi_device = SpiDeviceDriver::new(
-        spi.clone(),
-        Some(peripherals.pins.gpio26),
-        &SpiConfig::new(),
+    run_tasks(adc_bus, imu_bus, state);
+}
+
+fn init_spi_bus(
+    spi2: impl SpiAnyPins + 'static,
+    sck: impl OutputPin + 'static,
+    mosi: impl OutputPin + 'static,
+    miso: impl InputPin + 'static,
+) -> Arc<SpiDriver<'static>> {
+    let spi = SpiDriver::new(spi2, sck, mosi, Some(miso), &SpiDriverConfig::new())
+        .expect("SPI driver init failed");
+    Arc::new(spi)
+}
+
+/// Initializes the MCP2518FD and runs its internal-loopback self-test.
+/// Not wired up further yet -- see the TODO where this is called.
+fn init_can(spi: Arc<SpiDriver<'static>>, cs: impl OutputPin + 'static) {
+    let spi_device =
+        SpiDeviceDriver::new(spi, Some(cs), &SpiConfig::new()).expect("CAN SPI device init failed");
+
+    let mut delay = FreeRtos;
+    let mut bus = CanBus::new(spi_device, &mut delay).expect("CAN init failed");
+    match bus.self_test(&mut delay) {
+        Ok(()) => info!("CAN self-test passed"),
+        Err(e) => log::error!("CAN self-test failed: {:?}", e),
+    }
+}
+
+fn init_adc(spi: Arc<SpiDriver<'static>>, cs: impl OutputPin + 'static) -> AdcBus {
+    let spi_device =
+        SpiDeviceDriver::new(spi, Some(cs), &SpiConfig::new()).expect("ADC SPI device init failed");
+    AdcBus::new(spi_device, adc::Range::R5V)
+}
+
+fn init_imu(
+    i2c0: impl I2cPeripheral + 'static,
+    sda: impl InputPin + OutputPin + 'static,
+    scl: impl InputPin + OutputPin + 'static,
+) -> ImuBus {
+    let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new()).expect("I2C driver init failed");
+    ImuBus::new(i2c).expect("IMU init failed")
+}
+
+fn init_gnss(
+    uart1: impl UartPeripheral + 'static,
+    tx: impl OutputPin + 'static,
+    rx: impl InputPin + 'static,
+    state: Arc<SensorState>,
+) {
+    let gnss_uart = UartDriver::new(
+        uart1,
+        tx,
+        rx,
+        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
+        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
+        &uart_config::Config::new().baudrate(Hertz(38_400)),
     )
-    .expect("ADC SPI device init failed");
-    let adc_bus: Arc<Mutex<adc::AdcBusType>> = Arc::new(Mutex::new(adc::AdcBus::new(
-        adc_spi_device,
-        adc::Range::R5V,
-    )));
+    .expect("GNSS UART init failed");
+    gnss::spawn_reader(gnss_uart, state);
+}
 
-    let i2c = I2cDriver::new(
-        peripherals.i2c0,
-        peripherals.pins.gpio2, // SDA
-        peripherals.pins.gpio3, // SCL
-        &I2cConfig::new(),
-    )
-    .expect("I2C driver init failed");
-    let imu_bus = imu::ImuBus::new(i2c).expect("IMU init failed");
-
-    // let bus: Arc<Mutex<CanBusType>> = Arc::new(Mutex::new(bus));
-
+/// Starts the embassy executor and spawns every background task. Never returns.
+fn run_tasks(adc_bus: Arc<Mutex<AdcBus>>, imu_bus: ImuBus, state: Arc<SensorState>) -> ! {
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
     executor.run(move |spawner| {
-        // spawner.spawn(can_poll_task(int_pin, bus).expect("can_poll_task"));
-        spawner.spawn(serial_task().expect("serial_task"));
-        spawner.spawn(adc::adc_poll_task(adc_bus).expect("adc_poll_task"));
-        spawner.spawn(imu::imu_poll_task(imu_bus).expect("imu_poll_task"));
-        spawner.spawn(logging::log_task().expect("log_task"));
+        spawner.spawn(serial_task(state.clone()).expect("serial_task"));
+        spawner.spawn(adc::adc_poll_task(adc_bus, state.clone()).expect("adc_poll_task"));
+        spawner.spawn(imu::imu_poll_task(imu_bus, state.clone()).expect("imu_poll_task"));
+        spawner.spawn(logging::log_task(state).expect("log_task"));
         spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
-    });
+    })
 }

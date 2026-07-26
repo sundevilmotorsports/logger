@@ -1,16 +1,11 @@
 use crate::configuration::CONFIGURATION;
+use crate::state::SensorState;
 use embassy_time::Timer;
-use embedded_hal::spi::SpiDevice;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
+use esp_idf_svc::sys::EspError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
-
-pub type AdcBusType = AdcBus<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>;
-
-/// Latest raw 12-bit reading per ADC channel (0-7).
-pub static LATEST_ADC: LazyLock<Mutex<HashMap<u8, u16>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+use std::sync::{Arc, Mutex};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdcChannel {
@@ -47,20 +42,23 @@ pub enum Range {
 }
 
 #[derive(Debug)]
-pub enum AdcError<E> {
-    Spi(E),
+pub enum AdcError {
+    Spi(EspError),
     /// The address the chip echoed back didn't match the channel requested.
     ChannelMismatch { expected: u8, got: u8 },
 }
 
 /// Driver for the TI ADS7951 (12-bit, 8-channel, manual-mode SPI ADC).
-pub struct AdcBus<SPI> {
-    spi: SPI,
+///
+/// Concrete over the board's one real SPI device rather than generic --
+/// nothing else is ever plugged in here.
+pub struct AdcBus {
+    spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
     range: Range,
 }
 
-impl<SPI: SpiDevice> AdcBus<SPI> {
-    pub fn new(spi: SPI, range: Range) -> Self {
+impl AdcBus {
+    pub fn new(spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>, range: Range) -> Self {
         Self { spi, range }
     }
 
@@ -71,7 +69,7 @@ impl<SPI: SpiDevice> AdcBus<SPI> {
     /// frame after that. So selecting a channel and reading its result takes
     /// two 16-bit frames; we send the same request twice and take the
     /// second reply, which also lets us confirm the echoed channel address.
-    pub fn read_channel(&mut self, channel: u8) -> Result<u16, AdcError<SPI::Error>> {
+    pub fn read_channel(&mut self, channel: u8) -> Result<u16, AdcError> {
         let mut word = control_word(channel, self.range).to_be_bytes();
         self.spi.transfer_in_place(&mut word).map_err(AdcError::Spi)?;
         self.spi.transfer_in_place(&mut word).map_err(AdcError::Spi)?;
@@ -105,7 +103,7 @@ fn control_word(channel: u8, range: Range) -> u16 {
 }
 
 #[embassy_executor::task]
-pub async fn adc_poll_task(bus: Arc<Mutex<AdcBusType>>) {
+pub async fn adc_poll_task(bus: Arc<Mutex<AdcBus>>, state: Arc<SensorState>) {
     loop {
         let channels: Vec<u8> = CONFIGURATION
             .lock()
@@ -127,7 +125,7 @@ pub async fn adc_poll_task(bus: Arc<Mutex<AdcBusType>>) {
                 }
             }
         }
-        *LATEST_ADC.lock().unwrap() = latest;
+        *state.adc.lock().unwrap() = latest;
 
         Timer::after_millis(50).await;
     }

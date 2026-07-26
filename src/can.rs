@@ -1,4 +1,4 @@
-use embedded_hal::{delay::DelayNs, spi::SpiDevice};
+use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use mcp2518fd::memory::controller::fifo::PayloadSize;
@@ -13,17 +13,16 @@ use mcp2518fd::{
     },
     ConfigError, Error, MCP2518FD,
 };
+use crate::state::SensorState;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-use std::sync::{Arc, LazyLock, Mutex};
-
-pub type CanBusType = CanBus<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>;
-
-pub static LATEST_SIGNALS: LazyLock<Mutex<HashMap<String, Vec<u8>>>> =
-    LazyLock::new(|| Mutex::new(HashMap::new()));
+use std::sync::{Arc, Mutex};
 
 #[embassy_executor::task]
-pub async fn can_poll_task(mut int_pin: PinDriver<'static, Input>, bus: Arc<Mutex<CanBusType>>) {
+pub async fn can_poll_task(
+    mut int_pin: PinDriver<'static, Input>,
+    bus: Arc<Mutex<CanBus>>,
+    state: Arc<SensorState>,
+) {
     loop {
         int_pin.wait_for_falling_edge().await.ok();
 
@@ -38,7 +37,7 @@ pub async fn can_poll_task(mut int_pin: PinDriver<'static, Input>, bus: Arc<Mute
             }
         };
         if !updates.is_empty() {
-            let mut latest = LATEST_SIGNALS.lock().unwrap();
+            let mut latest = state.can_signals.lock().unwrap();
             for (name, bytes) in updates {
                 latest.insert(name, bytes);
             }
@@ -139,15 +138,20 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-pub struct CanBus<SPI> {
-    controller: MCP2518FD<SPI>,
+/// Concrete over the board's one real SPI device rather than generic --
+/// nothing else is ever plugged in here.
+pub struct CanBus {
+    controller: MCP2518FD<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>,
     devices: Vec<CanDevice>,
 }
 
-impl<SPI: SpiDevice> CanBus<SPI> {
+impl CanBus {
     /// Initializes the MCP2518FD in CAN FD mode (500 kbit/s nominal, 1 Mbit/s data).
     /// `delay` is only used here during chip mode transitions; not needed after init.
-    pub fn new(spi: SPI, delay: &mut impl DelayNs) -> Result<Self, ConfigError> {
+    pub fn new(
+        spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
+        delay: &mut impl DelayNs,
+    ) -> Result<Self, ConfigError> {
         let mut controller = MCP2518FD::new(spi);
         controller.reset().map_err(ConfigError::Other)?;
         controller.configure(

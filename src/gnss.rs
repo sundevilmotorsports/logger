@@ -1,8 +1,9 @@
+use crate::state::SensorState;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay;
 use esp_idf_svc::hal::uart::UartDriver;
 use serde::Serialize;
-use std::sync::{LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
 #[derive(Clone, Serialize)]
 pub struct Fix {
@@ -14,18 +15,19 @@ pub struct Fix {
     pub utc: Option<NaiveDateTime>,
 }
 
-pub static LATEST_FIX: LazyLock<Mutex<Option<Fix>>> = LazyLock::new(|| Mutex::new(None));
-
+/// The most recent RMC sentence's date, needed to build a full timestamp out
+/// of GGA's time-only field. Purely an internal parsing detail of this
+/// reader thread, never read by anything outside this module.
 static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
 
-pub fn spawn_reader(driver: UartDriver<'static>) {
+pub fn spawn_reader(driver: UartDriver<'static>, state: Arc<SensorState>) {
     std::thread::Builder::new()
         .stack_size(4096)
-        .spawn(move || reader_thread(driver))
+        .spawn(move || reader_thread(driver, state))
         .expect("gnss reader thread");
 }
 
-fn reader_thread(driver: UartDriver<'static>) {
+fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
     loop {
@@ -38,7 +40,7 @@ fn reader_thread(driver: UartDriver<'static>) {
                         *LATEST_DATE.lock().unwrap() = Some(date);
                     }
                     if let Some(fix) = parse_gga(line) {
-                        *LATEST_FIX.lock().unwrap() = Some(fix);
+                        *state.gps.lock().unwrap() = Some(fix);
                     }
                 }
                 buf.clear();
