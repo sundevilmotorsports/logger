@@ -23,12 +23,14 @@ use esp_idf_svc::hal::spi::{
 };
 use esp_idf_svc::hal::uart::{config as uart_config, Uart as UartPeripheral, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
+use esp_idf_svc::timer::{EspAsyncTimer, EspTaskTimerService, EspTimerService};
 use imu::ImuBus;
 use log::info;
 use serial::serial_task;
 use state::SensorState;
 use static_cell::StaticCell;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use usb_hs::UsbHsCdc;
 
 fn main() {
@@ -123,11 +125,14 @@ fn init_gnss(
 fn run_tasks(adc_bus: Arc<Mutex<AdcBus>>, imu_bus: ImuBus, state: Arc<SensorState>) -> ! {
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
+
+    // Needs to stay alive. Could also `box::leak`
+    let _log_timer = logging::log_timer(state.clone()).expect("log_task");
+
     executor.run(move |spawner| {
         spawner.spawn(serial_task(state.clone()).expect("serial_task"));
         spawner.spawn(adc::adc_poll_task(adc_bus, state.clone()).expect("adc_poll_task"));
         spawner.spawn(imu::imu_poll_task(imu_bus, state.clone()).expect("imu_poll_task"));
-        spawner.spawn(logging::log_task(state).expect("log_task"));
         spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
     })
 }

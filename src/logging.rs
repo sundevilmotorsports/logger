@@ -6,10 +6,12 @@ use crate::imu::ImuReading;
 use crate::sd_fake::SD;
 use crate::state::SensorState;
 use embassy_time::Timer;
+use esp_idf_svc::timer::{EspTaskTimerService, EspTimer};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Whether `log_task` writes rows; toggled via the `set_logging` command.
 pub static ACTIVE: AtomicBool = AtomicBool::new(true);
@@ -230,4 +232,35 @@ pub async fn log_task(state: Arc<SensorState>) {
         }
         Timer::after_millis(50).await;
     }
+}
+
+pub fn log_timer(state: Arc<SensorState>) -> anyhow::Result<EspTimer<'static>> {
+    let can_signals = configured_can_signals();
+    let adc_channels = configured_adc_channels();
+
+    let timer_service = EspTaskTimerService::new()?;
+    let callback_timer = {
+        // Empty so the schema is (re)written on the first tick and after every `next_log`.
+        let mut current_name = String::new();
+
+        timer_service.timer(move || {
+            if ACTIVE.load(Ordering::Relaxed) {
+                let sources = snapshot(&can_signals, &adc_channels, &state);
+                let mut sd = SD.lock().unwrap();
+                if sd.current_name() != current_name {
+                    if let Err(e) = write_schema(&mut *sd, &sources) {
+                        log::error!("failed to write log schema: {e}");
+                    }
+                    current_name = sd.current_name();
+                }
+                if let Err(e) = write_row(&mut *sd, &sources) {
+                    log::warn!("failed to write log row: {e}");
+                }
+            }
+        })?
+    };
+
+    callback_timer.every(Duration::from_millis(50))?;
+
+    Ok(callback_timer)
 }
