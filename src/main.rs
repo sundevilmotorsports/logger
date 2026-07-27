@@ -46,7 +46,9 @@ fn main() {
     init_can(spi.clone(), p.pins.gpio34);
 
     let adc_bus = Arc::new(Mutex::new(init_adc(spi.clone(), p.pins.gpio27))); // TODO: Check spi
-    let imu_bus = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3);
+
+    let i2c = init_i2c_bus(p.i2c0, p.pins.gpio2, p.pins.gpio3);
+    let imu_bus = init_imu(i2c);
 
     init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32, state.clone());
 
@@ -87,12 +89,15 @@ fn init_adc(spi: Arc<SpiDriver<'static>>, cs: impl OutputPin + 'static) -> AdcBu
     AdcBus::new(spi_device, adc::Range::R5V)
 }
 
-fn init_imu(
+fn init_i2c_bus(
     i2c0: impl I2cPeripheral + 'static,
     sda: impl InputPin + OutputPin + 'static,
     scl: impl InputPin + OutputPin + 'static,
-) -> ImuBus {
-    let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new()).expect("I2C driver init failed");
+) -> I2cDriver<'static> {
+    I2cDriver::new(i2c0, sda, scl, &I2cConfig::new()).expect("I2C driver init failed")
+}
+
+fn init_imu(i2c: I2cDriver<'static>) -> ImuBus {
     ImuBus::new(i2c).expect("IMU init failed")
 }
 
