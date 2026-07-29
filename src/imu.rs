@@ -1,4 +1,5 @@
 use crate::state::SensorState;
+use embassy_executor::Spawner;
 use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::delay::{self, Ets};
@@ -62,11 +63,11 @@ pub struct ImuReading {
     pub mag_ut: [f32; 3],
 }
 
-pub struct ImuBus {
+pub struct Imu {
     i2c: I2cDriver<'static>,
 }
 
-impl ImuBus {
+impl Imu {
     pub fn new(mut i2c: I2cDriver<'static>) -> Result<Self, EspError> {
         i2c.write(ADDRESS, &[REG_CTRL1_XL, ODR_104HZ], delay::BLOCK)?;
         i2c.write(ADDRESS, &[REG_CTRL2_G, ODR_104HZ], delay::BLOCK)?;
@@ -115,8 +116,11 @@ impl ImuBus {
         &mut self,
         f: impl FnOnce(&mut I2cDriver<'static>) -> Result<T, EspError>,
     ) -> Result<T, EspError> {
-        self.i2c
-            .write(ADDRESS, &[REG_FUNC_CFG_ACCESS, BANK_SENSOR_HUB], delay::BLOCK)?;
+        self.i2c.write(
+            ADDRESS,
+            &[REG_FUNC_CFG_ACCESS, BANK_SENSOR_HUB],
+            delay::BLOCK,
+        )?;
         let result = f(&mut self.i2c);
         self.i2c
             .write(ADDRESS, &[REG_FUNC_CFG_ACCESS, BANK_USER], delay::BLOCK)?;
@@ -171,6 +175,10 @@ impl ImuBus {
         self.shub_write(REG_SLV0_CONFIG, 6 /* slave0_numop */)?;
         self.shub_write(REG_MASTER_CONFIG, MASTER_CONFIG_CONTINUOUS_READ)
     }
+
+    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+        spawner.spawn(poll_loop(self, state).expect("imu task"));
+    }
 }
 
 /// Three little-endian i16 axes packed as 6 bytes (X, Y, Z).
@@ -183,9 +191,9 @@ fn axes(bytes: &[u8; 6]) -> [i16; 3] {
 }
 
 #[embassy_executor::task]
-pub async fn imu_poll_task(mut bus: ImuBus, state: Arc<SensorState>) {
+async fn poll_loop(mut imu: Imu, state: Arc<SensorState>) {
     loop {
-        match bus.read() {
+        match imu.read() {
             Ok(reading) => *state.imu.lock().unwrap() = Some(reading),
             Err(e) => log::warn!("IMU read error: {e:?}"),
         }

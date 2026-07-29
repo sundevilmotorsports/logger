@@ -1,3 +1,5 @@
+use crate::state::SensorState;
+use embassy_executor::Spawner;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
@@ -13,37 +15,8 @@ use mcp2518fd::{
     },
     ConfigError, Error, MCP2518FD,
 };
-use crate::state::SensorState;
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, Mutex};
-
-#[embassy_executor::task]
-pub async fn can_poll_task(
-    mut int_pin: PinDriver<'static, Input>,
-    bus: Arc<Mutex<CanBus>>,
-    state: Arc<SensorState>,
-) {
-    loop {
-        int_pin.wait_for_falling_edge().await.ok();
-
-        let updates = {
-            let mut guard = bus.lock().unwrap();
-            match guard.poll_once() {
-                Ok(updates) => updates,
-                Err(e) => {
-                    log::warn!("CAN poll error: {:?}", e);
-                    continue;
-                }
-            }
-        };
-        if !updates.is_empty() {
-            let mut latest = state.can_signals.lock().unwrap();
-            for (name, bytes) in updates {
-                latest.insert(name, bytes);
-            }
-        }
-    }
-}
+use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Signal {
@@ -140,16 +113,24 @@ pub struct CanDevice {
 
 /// Concrete over the board's one real SPI device rather than generic --
 /// nothing else is ever plugged in here.
-pub struct CanBus {
+///
+/// Owns `int_pin` too: the mcp2518fd crate is a pure SPI register driver, it
+/// has no idea which MCU GPIO the chip's INT line is wired to (that's board
+/// wiring, not something a transport-generic driver crate could know), so
+/// watching it for the falling edge that signals "FIFO has data" has to
+/// happen out here rather than inside the driver.
+pub struct Can {
     controller: MCP2518FD<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>,
+    int_pin: PinDriver<'static, Input>,
     devices: Vec<CanDevice>,
 }
 
-impl CanBus {
+impl Can {
     /// Initializes the MCP2518FD in CAN FD mode (500 kbit/s nominal, 1 Mbit/s data).
     /// `delay` is only used here during chip mode transitions; not needed after init.
     pub fn new(
         spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
+        int_pin: PinDriver<'static, Input>,
         delay: &mut impl DelayNs,
     ) -> Result<Self, ConfigError> {
         let mut controller = MCP2518FD::new(spi);
@@ -212,6 +193,7 @@ impl CanBus {
 
         Ok(Self {
             controller,
+            int_pin,
             devices: Vec::new(),
         })
     }
@@ -263,7 +245,10 @@ impl CanBus {
         };
         for sig in active_signals {
             if sig.start + sig.len <= data.len() {
-                out.push((sig.name.clone(), data[sig.start..sig.start + sig.len].to_vec()));
+                out.push((
+                    sig.name.clone(),
+                    data[sig.start..sig.start + sig.len].to_vec(),
+                ));
             }
         }
     }
@@ -318,6 +303,32 @@ impl CanBus {
             .map_err(SelfTestError::Config)?;
 
         result
+    }
+
+    /// Spawns the interrupt-driven poll loop.
+    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+        spawner.spawn(poll_loop(self, state).expect("can task"));
+    }
+}
+
+#[embassy_executor::task]
+async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
+    loop {
+        can.int_pin.wait_for_falling_edge().await.ok();
+
+        let updates = match can.poll_once() {
+            Ok(updates) => updates,
+            Err(e) => {
+                log::warn!("CAN poll error: {:?}", e);
+                continue;
+            }
+        };
+        if !updates.is_empty() {
+            let mut latest = state.can_signals.lock().unwrap();
+            for (name, bytes) in updates {
+                latest.insert(name, bytes);
+            }
+        }
     }
 }
 
