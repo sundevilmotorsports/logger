@@ -314,7 +314,12 @@ impl Can {
 #[embassy_executor::task]
 async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
     loop {
-        can.int_pin.wait_for_falling_edge().await.ok();
+        // `wait_for_falling_edge` can fail synchronously
+        if let Err(e) = can.int_pin.wait_for_falling_edge().await {
+            log::error!("CAN INT pin wait failed: {:?}", e);
+            embassy_time::Timer::after_millis(500).await;
+            continue;
+        }
 
         let updates = match can.poll_once() {
             Ok(updates) => updates,

@@ -85,7 +85,10 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
 
         Command::Status => {
             let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();
-            ok(serde_json::json!({ "config_loaded": loaded }))
+            ok(serde_json::json!({
+                "config_loaded": loaded,
+                "subsystems": state.status.to_json(),
+            }))
         }
 
         Command::GetConfig => match Configuration::json() {

@@ -86,7 +86,7 @@ impl Adc {
         }
         Ok(resp & 0x0FFF)
     }
-    
+
     pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
         spawner.spawn(poll_loop(self, state).expect("adc task"));
     }

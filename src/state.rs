@@ -1,5 +1,6 @@
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
+use crate::status::DeviceStatus;
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -9,4 +10,5 @@ pub struct SensorState {
     pub adc: Mutex<HashMap<u8, u16>>,
     pub gps: Mutex<Option<Fix>>,
     pub imu: Mutex<Option<ImuReading>>,
+    pub status: DeviceStatus,
 }
