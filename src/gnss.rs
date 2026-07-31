@@ -3,7 +3,11 @@ use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay;
 use esp_idf_svc::hal::uart::UartDriver;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant};
+
+const STALE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Serialize)]
 pub struct Fix {
@@ -30,6 +34,7 @@ pub fn spawn_reader(driver: UartDriver<'static>, state: Arc<SensorState>) {
 fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
+    let mut last_fix = Instant::now();
     loop {
         let n = driver.read(&mut tmp, delay::BLOCK).unwrap_or(0);
         for &b in &tmp[..n] {
@@ -41,6 +46,8 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
                     }
                     if let Some(fix) = parse_gga(line) {
                         *state.gps.lock().unwrap() = Some(fix);
+                        last_fix = Instant::now();
+                        state.status.gnss.store(true, Ordering::Relaxed);
                     }
                 }
                 buf.clear();
@@ -50,6 +57,9 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
             } else {
                 buf.clear();
             }
+        }
+        if last_fix.elapsed() > STALE_TIMEOUT {
+            state.status.gnss.store(false, Ordering::Relaxed);
         }
     }
 }
