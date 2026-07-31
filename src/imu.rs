@@ -6,6 +6,7 @@ use esp_idf_svc::hal::delay::{self, Ets};
 use esp_idf_svc::hal::i2c::I2cDriver;
 use esp_idf_svc::sys::EspError;
 use serde::Serialize;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 const ADDRESS: u8 = 0x6b;
@@ -194,8 +195,14 @@ fn axes(bytes: &[u8; 6]) -> [i16; 3] {
 async fn poll_loop(mut imu: Imu, state: Arc<SensorState>) {
     loop {
         match imu.read() {
-            Ok(reading) => *state.imu.lock().unwrap() = Some(reading),
-            Err(e) => log::warn!("IMU read error: {e:?}"),
+            Ok(reading) => {
+                *state.imu.lock().unwrap() = Some(reading);
+                state.status.imu.store(true, Ordering::Relaxed);
+            }
+            Err(e) => {
+                log::warn!("IMU read error: {e:?}");
+                state.status.imu.store(false, Ordering::Relaxed);
+            }
         }
         Timer::after_millis(50).await;
     }
