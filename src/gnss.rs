@@ -1,6 +1,6 @@
 use crate::state::SensorState;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use esp_idf_svc::hal::delay;
+use esp_idf_svc::hal::delay::TickType;
 use esp_idf_svc::hal::uart::UartDriver;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -8,6 +8,7 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 const STALE_TIMEOUT: Duration = Duration::from_secs(5);
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Serialize)]
 pub struct Fix {
@@ -36,7 +37,9 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
     let mut tmp = [0u8; 128];
     let mut last_fix = Instant::now();
     loop {
-        let n = driver.read(&mut tmp, delay::BLOCK).unwrap_or(0);
+        let n = driver
+            .read(&mut tmp, TickType::from(READ_TIMEOUT).into())
+            .unwrap_or(0);
         for &b in &tmp[..n] {
             if b == b'\n' {
                 if let Ok(line) = std::str::from_utf8(&buf) {
@@ -64,13 +67,14 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
     }
 }
 
+fn checksum_body(line: &str) -> Option<&str> {
+    let (body, sum) = line.strip_prefix('$')?.split_once('*')?;
+    (u8::from_str_radix(sum, 16).ok()? == body.bytes().fold(0, |a, b| a ^ b)).then_some(body)
+}
+
 // $GxGGA,time,lat,N,lon,E,quality,numSV,HDOP,alt,M,...*checksum
 fn parse_gga(line: &str) -> Option<Fix> {
-    let (body, sum) = line.strip_prefix('$')?.split_once('*')?;
-    if u8::from_str_radix(sum, 16).ok()? != body.bytes().fold(0, |a, b| a ^ b) {
-        return None;
-    }
-
+    let body = checksum_body(line)?;
     let f: Vec<&str> = body.split(',').collect();
     if f.len() < 10 || !f[0].ends_with("GGA") {
         return None;
@@ -100,10 +104,7 @@ fn parse_gga(line: &str) -> Option<Fix> {
 
 // $GxRMC,time,status,lat,N,lon,E,speed,track,ddmmyy,...*checksum
 fn parse_rmc_date(line: &str) -> Option<NaiveDate> {
-    let (body, sum) = line.strip_prefix('$')?.split_once('*')?;
-    if u8::from_str_radix(sum, 16).ok()? != body.bytes().fold(0, |a, b| a ^ b) {
-        return None;
-    }
+    let body = checksum_body(line)?;
     let f: Vec<&str> = body.split(',').collect();
     if f.len() < 10 || !f[0].ends_with("RMC") {
         return None;
