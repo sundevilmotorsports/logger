@@ -91,10 +91,7 @@ fn main() {
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
 
-    let _log_timer = logging::log_timer(state.clone())
-        .inspect_err(|e| log::error!("failed to start log timer: {e:?}"))
-        .ok();
-    if _log_timer.is_some() {
+    if logging::spawn_logger(state.clone()) {
         state.status.logging.store(true, Ordering::Relaxed);
         info!("logging initialized, spawning tasks");
     }
