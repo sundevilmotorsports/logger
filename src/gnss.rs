@@ -1,6 +1,8 @@
 use crate::state::SensorState;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use esp_idf_svc::hal::delay::TickType;
+use embassy_executor::Spawner;
+use embassy_time::Timer;
+use esp_idf_svc::hal::delay::NON_BLOCK;
 use esp_idf_svc::hal::uart::UartDriver;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -9,7 +11,6 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 const STALE_TIMEOUT: Duration = Duration::from_secs(5);
-const READ_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Serialize)]
 pub struct Fix {
@@ -26,22 +27,25 @@ pub struct Fix {
 /// reader thread, never read by anything outside this module.
 static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
 
-pub fn spawn_reader(driver: UartDriver<'static>, state: Arc<SensorState>) -> bool {
-    std::thread::Builder::new()
-        .stack_size(4096)
-        .spawn(move || reader_thread(driver, state))
-        .inspect_err(|e| log::error!("gnss reader thread spawn failed: {e:?}"))
-        .is_ok()
+pub struct Gnss(UartDriver<'static>);
+
+impl Gnss {
+    pub fn new(driver: UartDriver<'static>) -> Self {
+        Self(driver)
+    }
+
+    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+        spawner.spawn(poll_loop(self.0, state).expect("gnss task"));
+    }
 }
 
-fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
+#[embassy_executor::task]
+async fn poll_loop(driver: UartDriver<'static>, state: Arc<SensorState>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
     let mut last_fix = Instant::now();
     loop {
-        let n = driver
-            .read(&mut tmp, TickType::from(READ_TIMEOUT).into())
-            .unwrap_or(0);
+        let n = driver.read(&mut tmp, NON_BLOCK).unwrap_or(0);
         for &b in &tmp[..n] {
             if b == b'\n' {
                 if let Ok(line) = std::str::from_utf8(&buf) {
@@ -66,6 +70,7 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
         if last_fix.elapsed() > STALE_TIMEOUT {
             state.status.gnss.store(false, Ordering::Relaxed);
         }
+        Timer::after_millis(20).await;
     }
 }
 

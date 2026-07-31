@@ -24,6 +24,7 @@ use esp_idf_svc::hal::spi::{
 };
 use esp_idf_svc::hal::uart::{config as uart_config, Uart as UartPeripheral, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
+use gnss::Gnss;
 use imu::Imu;
 use log::info;
 use serial::serial_task;
@@ -71,7 +72,8 @@ fn main() {
         info!("imu initialized");
     }
 
-    if init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32, state.clone()) {
+    let gnss = init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32);
+    if gnss.is_some() {
         state.status.gnss.store(true, Ordering::Relaxed);
         info!("gnss initialized");
     }
@@ -104,6 +106,9 @@ fn main() {
         }
         if let Some(imu) = imu {
             imu.spawn(spawner, state.clone());
+        }
+        if let Some(gnss) = gnss {
+            gnss.spawn(spawner, state.clone());
         }
         spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
         if let Some(can) = can {
@@ -175,9 +180,8 @@ fn init_gnss(
     uart1: impl UartPeripheral + 'static,
     tx: impl OutputPin + 'static,
     rx: impl InputPin + 'static,
-    state: Arc<SensorState>,
-) -> bool {
-    let Ok(gnss_uart) = UartDriver::new(
+) -> Option<Gnss> {
+    let uart = UartDriver::new(
         uart1,
         tx,
         rx,
@@ -185,8 +189,7 @@ fn init_gnss(
         Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
         &uart_config::Config::new().baudrate(Hertz(38_400)),
     )
-    .inspect_err(|e| log::error!("GNSS UART init failed: {e:?}")) else {
-        return false;
-    };
-    gnss::spawn_reader(gnss_uart, state)
+    .inspect_err(|e| log::error!("GNSS UART init failed: {e:?}"))
+    .ok()?;
+    Some(Gnss::new(uart))
 }
