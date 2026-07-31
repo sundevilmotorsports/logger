@@ -7,7 +7,6 @@ use crate::sd_fake::SD;
 use crate::state::SensorState;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
-use log::info;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -233,6 +232,9 @@ pub fn spawn_logger(state: Arc<SensorState>) -> bool {
     spawned
 }
 
+const LOG_HZ: u32 = 20;
+const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
+
 fn logger_thread(state: Arc<SensorState>) {
     let can_signals = configured_can_signals();
     let adc_channels = configured_adc_channels();
@@ -240,7 +242,11 @@ fn logger_thread(state: Arc<SensorState>) {
     // Empty so the schema is (re)written on the first tick and after every `next_log`.
     let mut current_name = String::new();
 
+    let mut next_tick = std::time::Instant::now();
+
     loop {
+        next_tick += LOG_PERIOD;
+
         if ACTIVE.load(Ordering::Relaxed) {
             let sources = snapshot(&can_signals, &adc_channels, &state);
             let mut sd = SD.lock();
@@ -254,6 +260,7 @@ fn logger_thread(state: Arc<SensorState>) {
                 log::warn!("failed to write log row: {e}");
             }
         }
-        std::thread::sleep(Duration::from_millis(50));
+
+        std::thread::sleep(next_tick.saturating_duration_since(std::time::Instant::now()));
     }
 }
