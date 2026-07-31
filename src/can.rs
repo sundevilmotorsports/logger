@@ -16,6 +16,7 @@ use mcp2518fd::{
     ConfigError, Error, MCP2518FD,
 };
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -314,7 +315,6 @@ impl Can {
 #[embassy_executor::task]
 async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
     loop {
-        // `wait_for_falling_edge` can fail synchronously
         if let Err(e) = can.int_pin.wait_for_falling_edge().await {
             log::error!("CAN INT pin wait failed: {:?}", e);
             embassy_time::Timer::after_millis(500).await;
@@ -322,9 +322,13 @@ async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
         }
 
         let updates = match can.poll_once() {
-            Ok(updates) => updates,
+            Ok(updates) => {
+                state.status.can.store(true, Ordering::Relaxed);
+                updates
+            }
             Err(e) => {
                 log::warn!("CAN poll error: {:?}", e);
+                state.status.can.store(false, Ordering::Relaxed);
                 continue;
             }
         };
