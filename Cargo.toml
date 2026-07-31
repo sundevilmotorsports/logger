@@ -1,6 +1,6 @@
 [package]
 name = "logger"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Nolan Peterson <ndpete2007@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -28,6 +28,7 @@ embassy-executor = { version = "0.10", features = ["executor-thread", "platform-
 embassy-time = { version = "0.5", features = ["generic-queue-8"] }
 embassy-sync = "0.7"
 static_cell = "2"
+parking_lot = "0.12"
 anyhow = "1.0.102"
 mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
 embedded-hal = "1.0.0"

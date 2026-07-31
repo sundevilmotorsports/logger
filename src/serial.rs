@@ -84,7 +84,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
         Command::Version => ok(serde_json::json!({ "version": env!("CARGO_PKG_VERSION") })),
 
         Command::Status => {
-            let loaded = !CONFIGURATION.lock().unwrap().can_devices.is_empty();
+            let loaded = !CONFIGURATION.lock().can_devices.is_empty();
             ok(serde_json::json!({
                 "config_loaded": loaded,
                 "subsystems": state.status.to_json(),
@@ -100,7 +100,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
         },
 
         Command::SetConfig { args } => {
-            let mut guard = CONFIGURATION.lock().unwrap();
+            let mut guard = CONFIGURATION.lock();
             guard.can_devices = args.can_devices;
             guard.adc_channels = args.adc_channels;
             drop(guard);
@@ -109,7 +109,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
 
         Command::Frames => {
             let snapshot: Vec<_> = {
-                let signals = state.can_signals.lock().unwrap();
+                let signals = state.can_signals.lock();
                 signals
                     .iter()
                     .map(|(name, bytes)| serde_json::json!({"name": name, "bytes": bytes}))
@@ -123,18 +123,18 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
             ok(serde_json::json!({ "uptime_seconds": time }))
         }
 
-        Command::Gps => match &*state.gps.lock().unwrap() {
+        Command::Gps => match &*state.gps.lock() {
             Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
             None => err("no fix".into()),
         },
 
-        Command::Imu => match &*state.imu.lock().unwrap() {
+        Command::Imu => match &*state.imu.lock() {
             Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
             None => err("no imu".into()),
         },
 
         Command::ListLogs => {
-            let sd = sd_fake::SD.lock().unwrap();
+            let sd = sd_fake::SD.lock();
             let logs: Vec<_> = sd
                 .list_logs()
                 .iter()
@@ -144,7 +144,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
         }
 
         Command::LogChunk { name, offset } => {
-            let sd = sd_fake::SD.lock().unwrap();
+            let sd = sd_fake::SD.lock();
             match sd.read_chunk(&name, offset, LOG_CHUNK_LEN) {
                 // Hex-encoded since the log is binary now, not ASCII.
                 Some(chunk) => ok(serde_json::json!({
@@ -156,7 +156,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
         }
 
         Command::LogStatus => {
-            let current = sd_fake::SD.lock().unwrap().current_name();
+            let current = sd_fake::SD.lock().current_name();
             ok(serde_json::json!({
                 "active": logging::ACTIVE.load(std::sync::atomic::Ordering::Relaxed),
                 "current": current,
@@ -169,7 +169,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
         }
 
         Command::NextLog => {
-            sd_fake::SD.lock().unwrap().next_log().ok();
+            sd_fake::SD.lock().next_log().ok();
             ok(serde_json::Value::Null)
         }
 
@@ -180,11 +180,12 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
     }
 }
 
-pub fn spawn_reader(driver: UsbHsCdc) {
+pub fn spawn_reader(driver: UsbHsCdc) -> bool {
     std::thread::Builder::new()
         .stack_size(8192)
         .spawn(move || reader_thread(driver))
-        .expect("serial reader thread");
+        .inspect_err(|e| log::error!("serial reader thread spawn failed: {e:?}"))
+        .is_ok()
 }
 
 fn reader_thread(mut driver: UsbHsCdc) {

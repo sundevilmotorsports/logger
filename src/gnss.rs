@@ -2,9 +2,10 @@ use crate::state::SensorState;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay::TickType;
 use esp_idf_svc::hal::uart::UartDriver;
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 const STALE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,11 +26,12 @@ pub struct Fix {
 /// reader thread, never read by anything outside this module.
 static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
 
-pub fn spawn_reader(driver: UartDriver<'static>, state: Arc<SensorState>) {
+pub fn spawn_reader(driver: UartDriver<'static>, state: Arc<SensorState>) -> bool {
     std::thread::Builder::new()
         .stack_size(4096)
         .spawn(move || reader_thread(driver, state))
-        .expect("gnss reader thread");
+        .inspect_err(|e| log::error!("gnss reader thread spawn failed: {e:?}"))
+        .is_ok()
 }
 
 fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
@@ -45,10 +47,10 @@ fn reader_thread(driver: UartDriver<'static>, state: Arc<SensorState>) {
                 if let Ok(line) = std::str::from_utf8(&buf) {
                     let line = line.trim_end_matches('\r');
                     if let Some(date) = parse_rmc_date(line) {
-                        *LATEST_DATE.lock().unwrap() = Some(date);
+                        *LATEST_DATE.lock() = Some(date);
                     }
                     if let Some(fix) = parse_gga(line) {
-                        *state.gps.lock().unwrap() = Some(fix);
+                        *state.gps.lock() = Some(fix);
                         last_fix = Instant::now();
                         state.status.gnss.store(true, Ordering::Relaxed);
                     }
@@ -85,12 +87,8 @@ fn parse_gga(line: &str) -> Option<Fix> {
         return None; // no fix yet
     }
 
-    let utc = parse_time(f[1]).and_then(|time| {
-        LATEST_DATE
-            .lock()
-            .unwrap()
-            .map(|date| NaiveDateTime::new(date, time))
-    });
+    let utc = parse_time(f[1])
+        .and_then(|time| LATEST_DATE.lock().map(|date| NaiveDateTime::new(date, time)));
 
     Some(Fix {
         lat: dm_to_deg(f[2])? * if f[3] == "S" { -1.0 } else { 1.0 },

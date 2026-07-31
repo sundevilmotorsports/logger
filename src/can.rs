@@ -333,7 +333,7 @@ async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
             }
         };
         if !updates.is_empty() {
-            let mut latest = state.can_signals.lock().unwrap();
+            let mut latest = state.can_signals.lock();
             for (name, bytes) in updates {
                 latest.insert(name, bytes);
             }

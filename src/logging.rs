@@ -139,7 +139,6 @@ impl LogSource for GpsColumns {
 fn configured_can_signals() -> Vec<Signal> {
     CONFIGURATION
         .lock()
-        .unwrap()
         .can_devices
         .iter()
         .flat_map(|dev| -> Vec<Signal> {
@@ -154,7 +153,7 @@ fn configured_can_signals() -> Vec<Signal> {
 }
 
 fn configured_adc_channels() -> Vec<AdcChannel> {
-    CONFIGURATION.lock().unwrap().adc_channels.clone()
+    CONFIGURATION.lock().adc_channels.clone()
 }
 
 fn snapshot<'a>(
@@ -165,14 +164,14 @@ fn snapshot<'a>(
     [
         Box::new(CanColumns {
             signals: can_signals,
-            latest: state.can_signals.lock().unwrap().clone(),
+            latest: state.can_signals.lock().clone(),
         }),
         Box::new(AdcColumns {
             channels: adc_channels,
-            latest: state.adc.lock().unwrap().clone(),
+            latest: state.adc.lock().clone(),
         }),
-        Box::new(GpsColumns(state.gps.lock().unwrap().clone())),
-        Box::new(ImuColumns(*state.imu.lock().unwrap())),
+        Box::new(GpsColumns(state.gps.lock().clone())),
+        Box::new(ImuColumns(*state.imu.lock())),
     ]
 }
 
@@ -219,7 +218,7 @@ pub async fn log_task(state: Arc<SensorState>) {
     loop {
         if ACTIVE.load(Ordering::Relaxed) {
             let sources = snapshot(&can_signals, &adc_channels, &state);
-            let mut sd = SD.lock().unwrap();
+            let mut sd = SD.lock();
             if sd.current_name() != current_name {
                 if let Err(e) = write_schema(&mut *sd, &sources) {
                     log::error!("failed to write log schema: {e}");
@@ -246,7 +245,7 @@ pub fn log_timer(state: Arc<SensorState>) -> anyhow::Result<EspTimer<'static>> {
         timer_service.timer(move || {
             if ACTIVE.load(Ordering::Relaxed) {
                 let sources = snapshot(&can_signals, &adc_channels, &state);
-                let mut sd = SD.lock().unwrap();
+                let mut sd = SD.lock();
                 if sd.current_name() != current_name {
                     if let Err(e) = write_schema(&mut *sd, &sources) {
                         log::error!("failed to write log schema: {e}");

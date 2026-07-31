@@ -196,7 +196,7 @@ async fn poll_loop(mut imu: Imu, state: Arc<SensorState>) {
     loop {
         match imu.read() {
             Ok(reading) => {
-                *state.imu.lock().unwrap() = Some(reading);
+                *state.imu.lock() = Some(reading);
                 state.status.imu.store(true, Ordering::Relaxed);
             }
             Err(e) => {

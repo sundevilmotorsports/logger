@@ -36,7 +36,7 @@ use usb_hs::UsbHsCdc;
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    Configuration::init().expect("config init failed");
+    Configuration::init();
     info!("Configuration initalized");
 
     let p = Peripherals::take().expect("failed to take peripherals");
@@ -47,15 +47,19 @@ fn main() {
     state.status.sd.store(true, Ordering::Relaxed);
 
     let spi = init_spi_bus(p.spi2, p.pins.gpio30, p.pins.gpio29, p.pins.gpio31);
-    info!("SPI initalized");
+    if spi.is_some() {
+        info!("SPI initalized");
+    }
 
-    let can = init_can(spi.clone(), p.pins.gpio34, p.pins.gpio11);
+    let can = spi
+        .clone()
+        .and_then(|spi| init_can(spi, p.pins.gpio34, p.pins.gpio11));
     if can.is_some() {
         state.status.can.store(true, Ordering::Relaxed);
         info!("can initialized");
     }
 
-    let adc = init_adc(spi.clone(), p.pins.gpio27); // TODO: Check spi
+    let adc = spi.and_then(|spi| init_adc(spi, p.pins.gpio27));
     if adc.is_some() {
         state.status.adc.store(true, Ordering::Relaxed);
         info!("adc initialized");
@@ -72,19 +76,26 @@ fn main() {
         info!("gnss initialized");
     }
 
-    let usb_hs = UsbHsCdc::new().expect("USB HS CDC init failed");
-    state.status.usb_hs.store(true, Ordering::Relaxed);
-    info!("usb hs initialized");
-
-    serial::spawn_reader(usb_hs);
-    info!("serial communication initialized");
+    let usb_hs = UsbHsCdc::new()
+        .inspect_err(|e| log::error!("USB HS CDC init failed: {e:?}"))
+        .ok();
+    if let Some(usb_hs) = usb_hs {
+        if serial::spawn_reader(usb_hs) {
+            state.status.usb_hs.store(true, Ordering::Relaxed);
+            info!("usb hs initialized, serial communication initialized");
+        }
+    }
 
     static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
     let executor = EXECUTOR.init(embassy_executor::Executor::new());
 
-    let _log_timer = logging::log_timer(state.clone()).expect("log_task");
-    state.status.logging.store(true, Ordering::Relaxed);
-    info!("logging initialized, spawning tasks");
+    let _log_timer = logging::log_timer(state.clone())
+        .inspect_err(|e| log::error!("failed to start log timer: {e:?}"))
+        .ok();
+    if _log_timer.is_some() {
+        state.status.logging.store(true, Ordering::Relaxed);
+        info!("logging initialized, spawning tasks");
+    }
 
     executor.run(move |spawner| {
         spawner.spawn(serial_task(state.clone()).expect("serial_task"));
@@ -106,10 +117,11 @@ fn init_spi_bus(
     sck: impl OutputPin + 'static,
     mosi: impl OutputPin + 'static,
     miso: impl InputPin + 'static,
-) -> Arc<SpiDriver<'static>> {
-    let spi = SpiDriver::new(spi2, sck, mosi, Some(miso), &SpiDriverConfig::new())
-        .expect("SPI driver init failed");
-    Arc::new(spi)
+) -> Option<Arc<SpiDriver<'static>>> {
+    SpiDriver::new(spi2, sck, mosi, Some(miso), &SpiDriverConfig::new())
+        .inspect_err(|e| log::error!("SPI driver init failed: {e:?}"))
+        .ok()
+        .map(Arc::new)
 }
 
 /// Initializes the MCP2518FD and runs its internal-loopback self-test.
@@ -176,6 +188,5 @@ fn init_gnss(
     .inspect_err(|e| log::error!("GNSS UART init failed: {e:?}")) else {
         return false;
     };
-    gnss::spawn_reader(gnss_uart, state);
-    true
+    gnss::spawn_reader(gnss_uart, state)
 }

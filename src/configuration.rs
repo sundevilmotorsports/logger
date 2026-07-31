@@ -1,9 +1,10 @@
 use crate::adc::AdcChannel;
 use crate::can::CanDevice;
 use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};
+use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 #[derive(Serialize, Deserialize)]
 pub struct Configuration {
@@ -24,9 +25,11 @@ pub static CONFIGURATION: LazyLock<Mutex<Configuration>> = LazyLock::new(|| {
 
 impl Configuration {
     /// Initialize NVS and load `config.json` from the SD card.
-    pub fn init() -> anyhow::Result<()> {
-        let nvs_partition = EspDefaultNvsPartition::take()?;
-        let nvs = EspNvs::new(nvs_partition, "logger", true)?;
+    pub fn init() {
+        match EspDefaultNvsPartition::take().and_then(|p| EspNvs::new(p, "logger", true)) {
+            Ok(nvs) => CONFIGURATION.lock().nvs = Some(nvs),
+            Err(e) => log::warn!("NVS init failed, continuing without persistent storage: {e}"),
+        }
 
         match fs::read_to_string("/sdcard/config.json") {
             Ok(json) => {
@@ -36,9 +39,6 @@ impl Configuration {
             }
             Err(e) => log::warn!("config.json not found on SD card: {e}"),
         }
-
-        CONFIGURATION.lock().unwrap().nvs = Some(nvs);
-        Ok(())
     }
 
     pub fn nvs(&self) -> Option<&EspDefaultNvs> {
@@ -51,13 +51,13 @@ impl Configuration {
 
     pub fn load_json(json: &str) -> Result<(), serde_json::Error> {
         let config: Configuration = serde_json::from_str(json)?;
-        let mut guard = CONFIGURATION.lock().unwrap();
+        let mut guard = CONFIGURATION.lock();
         guard.can_devices = config.can_devices;
         guard.adc_channels = config.adc_channels;
         Ok(())
     }
 
     pub fn json() -> Result<String, serde_json::Error> {
-        serde_json::to_string(&*CONFIGURATION.lock().unwrap())
+        serde_json::to_string(&*CONFIGURATION.lock())
     }
 }

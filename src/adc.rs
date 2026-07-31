@@ -113,7 +113,6 @@ async fn poll_loop(mut adc: Adc, state: Arc<SensorState>) {
     loop {
         let channels: Vec<u8> = CONFIGURATION
             .lock()
-            .unwrap()
             .adc_channels
             .iter()
             .map(|c| c.channel)
@@ -128,7 +127,7 @@ async fn poll_loop(mut adc: Adc, state: Arc<SensorState>) {
                 Err(e) => log::warn!("ADC read error on channel {ch}: {e:?}"),
             }
         }
-        *state.adc.lock().unwrap() = latest;
+        *state.adc.lock() = latest;
 
         Timer::after_millis(50).await;
     }

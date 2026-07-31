@@ -1,7 +1,8 @@
 use log::info;
+use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::convert::Infallible;
-use std::sync::{LazyLock, Mutex};
+use std::sync::LazyLock;
 
 const LOG_EXT: &str = ".bin";
 
@@ -71,7 +72,7 @@ impl FakeSdCard {
 impl std::io::Write for FakeSdCard {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         let name = self.current_name();
-        self.files.get_mut(&name).unwrap().extend_from_slice(buf);
+        self.files.entry(name).or_default().extend_from_slice(buf);
         Ok(buf.len())
     }
 

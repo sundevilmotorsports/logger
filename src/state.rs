@@ -1,8 +1,8 @@
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
 use crate::status::DeviceStatus;
+use parking_lot::Mutex;
 use std::collections::HashMap;
-use std::sync::Mutex;
 
 #[derive(Default)]
 pub struct SensorState {
