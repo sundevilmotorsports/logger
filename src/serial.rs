@@ -57,6 +57,7 @@ pub fn spawn(driver: UsbHsCdc, state: Arc<State>) -> bool {
     }
 
     std::thread::Builder::new()
+        .stack_size(8192)
         .spawn(move || dispatch_thread(state, cmd_rx, resp_tx))
         .inspect_err(|e| log::error!("serial dispatch thread spawn failed: {e:?}"))
         .is_ok()

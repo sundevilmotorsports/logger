@@ -88,6 +88,7 @@ impl Adc {
 
     pub fn spawn(self, state: Arc<State>) -> bool {
         std::thread::Builder::new()
+            .stack_size(8192)
             .spawn(move || poll_loop(self, state))
             .inspect_err(|e| log::error!("adc thread spawn failed: {e:?}"))
             .is_ok()
