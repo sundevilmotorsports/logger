@@ -5,6 +5,7 @@ mod configuration;
 mod gnss;
 mod imu;
 mod logging;
+mod resources;
 mod sd;
 mod sd_fake;
 mod serial;

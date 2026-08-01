@@ -37,6 +37,7 @@ enum Command {
     Uptime,
     Gps,
     Imu,
+    Resources,
     ListLogs,
     LogChunk { name: String, offset: u64 },
     LogStatus,
@@ -132,6 +133,8 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
             Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
             None => err("no imu".into()),
         },
+
+        Command::Resources => ok(serde_json::to_value(state.resources.lock().sample()).unwrap_or_default()),
 
         Command::ListLogs => {
             let sd = sd_fake::SD.lock();

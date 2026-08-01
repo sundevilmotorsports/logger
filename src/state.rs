@@ -1,5 +1,6 @@
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
+use crate::resources::ResourceMonitor;
 use crate::status::DeviceStatus;
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -11,4 +12,5 @@ pub struct SensorState {
     pub gps: Mutex<Option<Fix>>,
     pub imu: Mutex<Option<ImuReading>>,
     pub status: DeviceStatus,
+    pub resources: Mutex<ResourceMonitor>,
 }
