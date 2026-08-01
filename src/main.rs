@@ -29,7 +29,7 @@ use gnss::Gnss;
 use imu::Imu;
 use log::info;
 use serial::serial_task;
-use state::SensorState;
+use state::State;
 use static_cell::StaticCell;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -42,7 +42,7 @@ fn main() {
     info!("Configuration initalized");
 
     let p = Peripherals::take().expect("failed to take peripherals");
-    let state = Arc::new(SensorState::default());
+    let state = Arc::new(State::default());
     info!("Peripherials");
 
     // Real SD hardware is dead

@@ -1,4 +1,4 @@
-use crate::state::SensorState;
+use crate::state::State;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use embassy_executor::Spawner;
 use embassy_time::Timer;
@@ -34,13 +34,13 @@ impl Gnss {
         Self(driver)
     }
 
-    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
         spawner.spawn(poll_loop(self.0, state).expect("gnss task"));
     }
 }
 
 #[embassy_executor::task]
-async fn poll_loop(driver: UartDriver<'static>, state: Arc<SensorState>) {
+async fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
     let mut last_fix = Instant::now();
@@ -54,7 +54,7 @@ async fn poll_loop(driver: UartDriver<'static>, state: Arc<SensorState>) {
                         *LATEST_DATE.lock() = Some(date);
                     }
                     if let Some(fix) = parse_gga(line) {
-                        *state.gps.lock() = Some(fix);
+                        *state.sensors.gps.lock() = Some(fix);
                         last_fix = Instant::now();
                         state.status.gnss.store(true, Ordering::Relaxed);
                     }

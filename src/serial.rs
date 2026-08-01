@@ -1,5 +1,5 @@
 use crate::configuration::{Configuration, CONFIGURATION};
-use crate::state::SensorState;
+use crate::state::State;
 use crate::usb_hs::UsbHsCdc;
 use crate::{logging, sd_fake};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -47,7 +47,7 @@ enum Command {
 }
 
 #[embassy_executor::task]
-pub async fn serial_task(state: Arc<SensorState>) {
+pub async fn serial_task(state: Arc<State>) {
     loop {
         let payload = COMMAND_CHANNEL.receive().await;
         let response = handle_command(&payload, &state);
@@ -69,7 +69,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn handle_command(payload: &str, state: &SensorState) -> String {
+fn handle_command(payload: &str, state: &State) -> String {
     let ok =
         |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
     let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
@@ -110,7 +110,7 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
 
         Command::Frames => {
             let snapshot: Vec<_> = {
-                let signals = state.can_signals.lock();
+                let signals = state.sensors.can.lock();
                 signals
                     .iter()
                     .map(|(name, bytes)| serde_json::json!({"name": name, "bytes": bytes}))
@@ -124,12 +124,12 @@ fn handle_command(payload: &str, state: &SensorState) -> String {
             ok(serde_json::json!({ "uptime_seconds": time }))
         }
 
-        Command::Gps => match &*state.gps.lock() {
+        Command::Gps => match &*state.sensors.gps.lock() {
             Some(fix) => ok(serde_json::to_value(fix).unwrap_or_default()),
             None => err("no fix".into()),
         },
 
-        Command::Imu => match &*state.imu.lock() {
+        Command::Imu => match &*state.sensors.imu.lock() {
             Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
             None => err("no imu".into()),
         },

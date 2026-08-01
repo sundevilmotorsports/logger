@@ -4,7 +4,7 @@ use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
 use crate::sd_fake::SD;
-use crate::state::SensorState;
+use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use std::collections::HashMap;
@@ -159,19 +159,19 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
 fn snapshot<'a>(
     can_signals: &'a [Signal],
     adc_channels: &'a [AdcChannel],
-    state: &SensorState,
+    state: &State,
 ) -> [Box<dyn LogSource + 'a>; 4] {
     [
         Box::new(CanColumns {
             signals: can_signals,
-            latest: state.can_signals.lock().clone(),
+            latest: state.sensors.can.lock().clone(),
         }),
         Box::new(AdcColumns {
             channels: adc_channels,
-            latest: state.adc.lock().clone(),
+            latest: state.sensors.adc.lock().clone(),
         }),
-        Box::new(GpsColumns(state.gps.lock().clone())),
-        Box::new(ImuColumns(*state.imu.lock())),
+        Box::new(GpsColumns(state.sensors.gps.lock().clone())),
+        Box::new(ImuColumns(*state.sensors.imu.lock())),
     ]
 }
 
@@ -207,7 +207,7 @@ fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::R
     Ok(())
 }
 
-pub fn spawn_logger(state: Arc<SensorState>) -> bool {
+pub fn spawn_logger(state: Arc<State>) -> bool {
     let previous = ThreadSpawnConfiguration::get();
     if let Err(e) = (ThreadSpawnConfiguration {
         pin_to_core: Some(Core::Core1),
@@ -235,7 +235,7 @@ pub fn spawn_logger(state: Arc<SensorState>) -> bool {
 const LOG_HZ: u32 = 20;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
-fn logger_thread(state: Arc<SensorState>) {
+fn logger_thread(state: Arc<State>) {
     let can_signals = configured_can_signals();
     let adc_channels = configured_adc_channels();
 

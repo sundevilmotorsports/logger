@@ -1,5 +1,5 @@
 use crate::configuration::CONFIGURATION;
-use crate::state::SensorState;
+use crate::state::State;
 use embassy_executor::Spawner;
 use embassy_time::Timer;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
@@ -87,7 +87,7 @@ impl Adc {
         Ok(resp & 0x0FFF)
     }
 
-    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
         spawner.spawn(poll_loop(self, state).expect("adc task"));
     }
 }
@@ -109,7 +109,7 @@ fn control_word(channel: u8, range: Range) -> u16 {
 }
 
 #[embassy_executor::task]
-async fn poll_loop(mut adc: Adc, state: Arc<SensorState>) {
+async fn poll_loop(mut adc: Adc, state: Arc<State>) {
     loop {
         let channels: Vec<u8> = CONFIGURATION
             .lock()
@@ -127,7 +127,7 @@ async fn poll_loop(mut adc: Adc, state: Arc<SensorState>) {
                 Err(e) => log::warn!("ADC read error on channel {ch}: {e:?}"),
             }
         }
-        *state.adc.lock() = latest;
+        *state.sensors.adc.lock() = latest;
 
         Timer::after_millis(50).await;
     }

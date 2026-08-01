@@ -1,4 +1,4 @@
-use crate::state::SensorState;
+use crate::state::State;
 use embassy_executor::Spawner;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
@@ -307,13 +307,13 @@ impl Can {
     }
 
     /// Spawns the interrupt-driven poll loop.
-    pub fn spawn(self, spawner: Spawner, state: Arc<SensorState>) {
+    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
         spawner.spawn(poll_loop(self, state).expect("can task"));
     }
 }
 
 #[embassy_executor::task]
-async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
+async fn poll_loop(mut can: Can, state: Arc<State>) {
     loop {
         if let Err(e) = can.int_pin.wait_for_falling_edge().await {
             log::error!("CAN INT pin wait failed: {:?}", e);
@@ -333,7 +333,7 @@ async fn poll_loop(mut can: Can, state: Arc<SensorState>) {
             }
         };
         if !updates.is_empty() {
-            let mut latest = state.can_signals.lock();
+            let mut latest = state.sensors.can.lock();
             for (name, bytes) in updates {
                 latest.insert(name, bytes);
             }
