@@ -1,5 +1,4 @@
 use crate::state::State;
-use embassy_executor::Spawner;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
@@ -18,6 +17,7 @@ use mcp2518fd::{
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Signal {
@@ -306,18 +306,19 @@ impl Can {
         result
     }
 
-    /// Spawns the interrupt-driven poll loop.
-    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
-        spawner.spawn(poll_loop(self, state).expect("can task"));
+    pub fn spawn(self, state: Arc<State>) -> bool {
+        std::thread::Builder::new()
+            .spawn(move || poll_loop(self, state))
+            .inspect_err(|e| log::error!("can thread spawn failed: {e:?}"))
+            .is_ok()
     }
 }
 
-#[embassy_executor::task]
-async fn poll_loop(mut can: Can, state: Arc<State>) {
+fn poll_loop(mut can: Can, state: Arc<State>) {
     loop {
-        if let Err(e) = can.int_pin.wait_for_falling_edge().await {
+        if let Err(e) = esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge()) {
             log::error!("CAN INT pin wait failed: {:?}", e);
-            embassy_time::Timer::after_millis(500).await;
+            std::thread::sleep(Duration::from_millis(500));
             continue;
         }
 

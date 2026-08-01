@@ -1,6 +1,4 @@
 use crate::state::State;
-use embassy_executor::Spawner;
-use embassy_time::Timer;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::delay::{self, Ets};
 use esp_idf_svc::hal::i2c::I2cDriver;
@@ -8,6 +6,7 @@ use esp_idf_svc::sys::EspError;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 const ADDRESS: u8 = 0x6b;
 const REG_CTRL1_XL: u8 = 0x10;
@@ -177,8 +176,11 @@ impl Imu {
         self.shub_write(REG_MASTER_CONFIG, MASTER_CONFIG_CONTINUOUS_READ)
     }
 
-    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
-        spawner.spawn(poll_loop(self, state).expect("imu task"));
+    pub fn spawn(self, state: Arc<State>) -> bool {
+        std::thread::Builder::new()
+            .spawn(move || poll_loop(self, state))
+            .inspect_err(|e| log::error!("imu thread spawn failed: {e:?}"))
+            .is_ok()
     }
 }
 
@@ -191,8 +193,7 @@ fn axes(bytes: &[u8; 6]) -> [i16; 3] {
     ]
 }
 
-#[embassy_executor::task]
-async fn poll_loop(mut imu: Imu, state: Arc<State>) {
+fn poll_loop(mut imu: Imu, state: Arc<State>) {
     loop {
         match imu.read() {
             Ok(reading) => {
@@ -204,6 +205,6 @@ async fn poll_loop(mut imu: Imu, state: Arc<State>) {
                 state.status.imu.store(false, Ordering::Relaxed);
             }
         }
-        Timer::after_millis(50).await;
+        std::thread::sleep(Duration::from_millis(50));
     }
 }

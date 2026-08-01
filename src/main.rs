@@ -28,9 +28,7 @@ use esp_idf_svc::hal::units::Hertz;
 use gnss::Gnss;
 use imu::Imu;
 use log::info;
-use serial::serial_task;
 use state::State;
-use static_cell::StaticCell;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use usb_hs::UsbHsCdc;
@@ -53,66 +51,60 @@ fn main() {
         info!("SPI initalized");
     }
 
-    let can = spi
+    if let Some(can) = spi
         .clone()
-        .and_then(|spi| init_can(spi, p.pins.gpio34, p.pins.gpio11));
-    if can.is_some() {
-        state.status.can.store(true, Ordering::Relaxed);
-        info!("can initialized");
+        .and_then(|spi| init_can(spi, p.pins.gpio34, p.pins.gpio11))
+    {
+        if can.spawn(state.clone()) {
+            state.status.can.store(true, Ordering::Relaxed);
+            info!("can initialized");
+        }
     }
 
-    let adc = spi.and_then(|spi| init_adc(spi, p.pins.gpio27));
-    if adc.is_some() {
-        state.status.adc.store(true, Ordering::Relaxed);
-        info!("adc initialized");
+    if let Some(adc) = spi.and_then(|spi| init_adc(spi, p.pins.gpio27)) {
+        if adc.spawn(state.clone()) {
+            state.status.adc.store(true, Ordering::Relaxed);
+            info!("adc initialized");
+        }
     }
 
-    let imu = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3);
-    if imu.is_some() {
-        state.status.imu.store(true, Ordering::Relaxed);
-        info!("imu initialized");
+    if let Some(imu) = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3) {
+        if imu.spawn(state.clone()) {
+            state.status.imu.store(true, Ordering::Relaxed);
+            info!("imu initialized");
+        }
     }
 
-    let gnss = init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32);
-    if gnss.is_some() {
-        state.status.gnss.store(true, Ordering::Relaxed);
-        info!("gnss initialized");
+    if let Some(gnss) = init_gnss(p.uart1, p.pins.gpio33, p.pins.gpio32) {
+        if gnss.spawn(state.clone()) {
+            state.status.gnss.store(true, Ordering::Relaxed);
+            info!("gnss initialized");
+        }
     }
 
     let usb_hs = UsbHsCdc::new()
         .inspect_err(|e| log::error!("USB HS CDC init failed: {e:?}"))
         .ok();
     if let Some(usb_hs) = usb_hs {
-        if serial::spawn_reader(usb_hs) {
+        if serial::spawn(usb_hs, state.clone()) {
             state.status.usb_hs.store(true, Ordering::Relaxed);
             info!("usb hs initialized, serial communication initialized");
         }
     }
 
-    static EXECUTOR: StaticCell<embassy_executor::Executor> = StaticCell::new();
-    let executor = EXECUTOR.init(embassy_executor::Executor::new());
-
     if logging::spawn_logger(state.clone()) {
         state.status.logging.store(true, Ordering::Relaxed);
-        info!("logging initialized, spawning tasks");
+        info!("logging initialized");
     }
 
-    executor.run(move |spawner| {
-        spawner.spawn(serial_task(state.clone()).expect("serial_task"));
-        if let Some(adc) = adc {
-            adc.spawn(spawner, state.clone());
-        }
-        if let Some(imu) = imu {
-            imu.spawn(spawner, state.clone());
-        }
-        if let Some(gnss) = gnss {
-            gnss.spawn(spawner, state.clone());
-        }
-        spawner.spawn(bootloader::watch_task().expect("bootloader_watch_task"));
-        if let Some(can) = can {
-            can.spawn(spawner, state);
-        }
-    })
+    if !bootloader::spawn() {
+        log::error!("bootloader watch thread failed to start");
+    }
+
+    // Everything runs on its own thread now; park the main thread forever.
+    loop {
+        std::thread::park();
+    }
 }
 
 fn init_spi_bus(

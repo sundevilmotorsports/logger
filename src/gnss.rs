@@ -1,8 +1,6 @@
 use crate::state::State;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use embassy_executor::Spawner;
-use embassy_time::Timer;
-use esp_idf_svc::hal::delay::NON_BLOCK;
+use esp_idf_svc::hal::delay::TickType;
 use esp_idf_svc::hal::uart::UartDriver;
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -11,6 +9,7 @@ use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 const STALE_TIMEOUT: Duration = Duration::from_secs(5);
+const READ_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Serialize)]
 pub struct Fix {
@@ -34,18 +33,23 @@ impl Gnss {
         Self(driver)
     }
 
-    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
-        spawner.spawn(poll_loop(self.0, state).expect("gnss task"));
+    pub fn spawn(self, state: Arc<State>) -> bool {
+        std::thread::Builder::new()
+            .stack_size(4096)
+            .spawn(move || poll_loop(self.0, state))
+            .inspect_err(|e| log::error!("gnss thread spawn failed: {e:?}"))
+            .is_ok()
     }
 }
 
-#[embassy_executor::task]
-async fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) {
+fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) {
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 128];
     let mut last_fix = Instant::now();
     loop {
-        let n = driver.read(&mut tmp, NON_BLOCK).unwrap_or(0);
+        let n = driver
+            .read(&mut tmp, TickType::from(READ_TIMEOUT).into())
+            .unwrap_or(0);
         for &b in &tmp[..n] {
             if b == b'\n' {
                 if let Ok(line) = std::str::from_utf8(&buf) {
@@ -70,7 +74,6 @@ async fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) {
         if last_fix.elapsed() > STALE_TIMEOUT {
             state.status.gnss.store(false, Ordering::Relaxed);
         }
-        Timer::after_millis(20).await;
     }
 }
 

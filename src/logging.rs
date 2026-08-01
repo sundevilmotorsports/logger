@@ -7,6 +7,7 @@ use crate::sd_fake::SD;
 use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
+use esp_idf_svc::sys::esp_timer_get_time;
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -199,7 +200,7 @@ fn write_schema(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io
 }
 
 fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
-    let ts = embassy_time::Instant::now().as_millis();
+    let ts = (unsafe { esp_timer_get_time() } / 1_000) as u64;
     sink.write_all(&ts.to_le_bytes())?;
     for src in sources {
         src.write_row(&mut sink)?;

@@ -1,12 +1,11 @@
 use crate::configuration::CONFIGURATION;
 use crate::state::State;
-use embassy_executor::Spawner;
-use embassy_time::Timer;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::EspError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdcChannel {
@@ -87,8 +86,11 @@ impl Adc {
         Ok(resp & 0x0FFF)
     }
 
-    pub fn spawn(self, spawner: Spawner, state: Arc<State>) {
-        spawner.spawn(poll_loop(self, state).expect("adc task"));
+    pub fn spawn(self, state: Arc<State>) -> bool {
+        std::thread::Builder::new()
+            .spawn(move || poll_loop(self, state))
+            .inspect_err(|e| log::error!("adc thread spawn failed: {e:?}"))
+            .is_ok()
     }
 }
 
@@ -108,8 +110,7 @@ fn control_word(channel: u8, range: Range) -> u16 {
     MANUAL_MODE | WRITE_ENABLE | addr | range_bit
 }
 
-#[embassy_executor::task]
-async fn poll_loop(mut adc: Adc, state: Arc<State>) {
+fn poll_loop(mut adc: Adc, state: Arc<State>) {
     loop {
         let channels: Vec<u8> = CONFIGURATION
             .lock()
@@ -129,6 +130,6 @@ async fn poll_loop(mut adc: Adc, state: Arc<State>) {
         }
         *state.sensors.adc.lock() = latest;
 
-        Timer::after_millis(50).await;
+        std::thread::sleep(Duration::from_millis(50));
     }
 }

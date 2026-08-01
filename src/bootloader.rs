@@ -1,6 +1,6 @@
-use embassy_time::Timer;
 use esp_idf_svc::sys::esp_restart;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 const LP_SYSTEM_REG_SYS_CTRL_REG: *mut u32 = 0x5011_0008 as *mut u32;
 const FORCE_DOWNLOAD_BOOT: u32 = 1 << 2;
@@ -18,12 +18,18 @@ pub fn reboot_to_bootloader() -> ! {
     }
 }
 
-#[embassy_executor::task]
-pub async fn watch_task() {
+pub fn spawn() -> bool {
+    std::thread::Builder::new()
+        .spawn(watch_thread)
+        .inspect_err(|e| log::error!("bootloader watch thread spawn failed: {e:?}"))
+        .is_ok()
+}
+
+fn watch_thread() {
     loop {
         if REQUESTED.swap(false, Ordering::Relaxed) {
             reboot_to_bootloader();
         }
-        Timer::after_millis(20).await;
+        std::thread::sleep(Duration::from_millis(20));
     }
 }

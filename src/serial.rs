@@ -2,24 +2,19 @@ use crate::configuration::{Configuration, CONFIGURATION};
 use crate::state::State;
 use crate::usb_hs::UsbHsCdc;
 use crate::{logging, sd_fake};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
-use embassy_sync::channel::Channel;
-use embassy_time::Timer;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
-use esp_idf_svc::systime::EspSystemTime;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 const MAX_PAYLOAD: usize = 16 * 1024;
+const CHANNEL_CAPACITY: usize = 4;
 
 /// Bytes per `LogChunk` response; the client requests successive offsets
 /// until it gets back fewer than this many bytes.
 const LOG_CHUNK_LEN: usize = 512;
-
-pub static COMMAND_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
-pub static RESPONSE_CHANNEL: Channel<CriticalSectionRawMutex, String, 4> = Channel::new();
 
 /// Set by `Command::Reboot`; checked after its ack is sent so the client
 /// gets a clean response before the device actually goes down.
@@ -46,15 +41,36 @@ enum Command {
     Reboot,
 }
 
-#[embassy_executor::task]
-pub async fn serial_task(state: Arc<State>) {
-    loop {
-        let payload = COMMAND_CHANNEL.receive().await;
+/// Spawns the USB reader thread and the command-dispatch thread that
+/// processes what it receives, connected by a pair of channels.
+pub fn spawn(driver: UsbHsCdc, state: Arc<State>) -> bool {
+    let (cmd_tx, cmd_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);
+    let (resp_tx, resp_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);
+
+    let reader_spawned = std::thread::Builder::new()
+        .stack_size(8192)
+        .spawn(move || reader_thread(driver, cmd_tx, resp_rx))
+        .inspect_err(|e| log::error!("serial reader thread spawn failed: {e:?}"))
+        .is_ok();
+    if !reader_spawned {
+        return false;
+    }
+
+    std::thread::Builder::new()
+        .spawn(move || dispatch_thread(state, cmd_rx, resp_tx))
+        .inspect_err(|e| log::error!("serial dispatch thread spawn failed: {e:?}"))
+        .is_ok()
+}
+
+fn dispatch_thread(state: Arc<State>, cmd_rx: mpsc::Receiver<String>, resp_tx: mpsc::SyncSender<String>) {
+    while let Ok(payload) = cmd_rx.recv() {
         let response = handle_command(&payload, &state);
-        RESPONSE_CHANNEL.send(response).await;
+        if resp_tx.send(response).is_err() {
+            break; // reader thread gone
+        }
 
         if REBOOT_REQUESTED.load(Ordering::Relaxed) {
-            Timer::after_millis(200).await; // give the ack time to actually flush over USB
+            std::thread::sleep(Duration::from_millis(200)); // give the ack time to actually flush over USB
             unsafe { esp_restart() };
         }
     }
@@ -183,22 +199,14 @@ fn handle_command(payload: &str, state: &State) -> String {
     }
 }
 
-pub fn spawn_reader(driver: UsbHsCdc) -> bool {
-    std::thread::Builder::new()
-        .stack_size(8192)
-        .spawn(move || reader_thread(driver))
-        .inspect_err(|e| log::error!("serial reader thread spawn failed: {e:?}"))
-        .is_ok()
-}
-
-fn reader_thread(mut driver: UsbHsCdc) {
+fn reader_thread(mut driver: UsbHsCdc, cmd_tx: mpsc::SyncSender<String>, resp_rx: mpsc::Receiver<String>) {
     use embedded_hal::delay::DelayNs;
 
     let mut buf = Vec::<u8>::new();
     let mut tmp = [0u8; 64];
 
     loop {
-        while let Ok(resp) = RESPONSE_CHANNEL.try_receive() {
+        while let Ok(resp) = resp_rx.try_recv() {
             let _ = driver.write(resp.as_bytes(), delay::BLOCK);
         }
 
@@ -211,7 +219,7 @@ fn reader_thread(mut driver: UsbHsCdc) {
                 let payload = String::from_utf8_lossy(&buf).trim().to_string();
                 buf.clear();
                 if !payload.is_empty() {
-                    if COMMAND_CHANNEL.try_send(payload).is_err() {
+                    if cmd_tx.try_send(payload).is_err() {
                         log::warn!("serial: command channel full, dropping payload");
                     }
                 }
