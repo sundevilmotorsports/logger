@@ -16,7 +16,6 @@ mod usb_hs;
 use adc::Adc;
 use can::Can;
 use configuration::Configuration;
-use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin, PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2c as I2cPeripheral, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
@@ -55,23 +54,20 @@ fn main() {
         .clone()
         .and_then(|spi| init_can(spi, p.pins.gpio34, p.pins.gpio11))
     {
-        if can.spawn(state.clone()) {
-            state.status.can.store(true, Ordering::Relaxed);
-            info!("can initialized");
+        if !can.spawn(state.clone()) {
+            log::error!("can thread failed to start");
         }
     }
 
     if let Some(adc) = spi.and_then(|spi| init_adc(spi, p.pins.gpio27)) {
-        if adc.spawn(state.clone()) {
-            state.status.adc.store(true, Ordering::Relaxed);
-            info!("adc initialized");
+        if !adc.spawn(state.clone()) {
+            log::error!("adc thread failed to start");
         }
     }
 
     if let Some(imu) = init_imu(p.i2c0, p.pins.gpio2, p.pins.gpio3) {
-        if imu.spawn(state.clone()) {
-            state.status.imu.store(true, Ordering::Relaxed);
-            info!("imu initialized");
+        if !imu.spawn(state.clone()) {
+            log::error!("imu thread failed to start");
         }
     }
 
@@ -119,9 +115,6 @@ fn init_spi_bus(
         .map(Arc::new)
 }
 
-/// Initializes the MCP2518FD and runs its internal-loopback self-test.
-/// Any failure just leaves CAN unavailable rather than taking the whole
-/// device down -- ADC/IMU/GNSS/logging can all still work without it.
 fn init_can(
     spi: Arc<SpiDriver<'static>>,
     cs: impl OutputPin + 'static,
@@ -134,16 +127,7 @@ fn init_can(
         .inspect_err(|e| log::error!("CAN INT pin init failed: {e:?}"))
         .ok()?;
 
-    let mut delay = FreeRtos;
-    let mut can = Can::new(spi_device, int_pin, &mut delay)
-        .inspect_err(|e| log::error!("CAN init failed: {e:?}"))
-        .ok()?;
-    match can.self_test(&mut delay) {
-        Ok(()) => info!("CAN self-test passed"),
-        Err(e) => log::error!("CAN self-test failed: {:?}", e),
-    }
-
-    Some(can)
+    Some(Can::new(spi_device, int_pin))
 }
 
 fn init_adc(spi: Arc<SpiDriver<'static>>, cs: impl OutputPin + 'static) -> Option<Adc> {
@@ -161,9 +145,7 @@ fn init_imu(
     let i2c = I2cDriver::new(i2c0, sda, scl, &I2cConfig::new())
         .inspect_err(|e| log::error!("I2C driver init failed: {e:?}"))
         .ok()?;
-    Imu::new(i2c)
-        .inspect_err(|e| log::error!("IMU init failed: {e:?}"))
-        .ok()
+    Some(Imu::new(i2c))
 }
 
 fn init_gnss(

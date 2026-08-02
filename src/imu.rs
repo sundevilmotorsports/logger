@@ -68,13 +68,16 @@ pub struct Imu {
 }
 
 impl Imu {
-    pub fn new(mut i2c: I2cDriver<'static>) -> Result<Self, EspError> {
-        i2c.write(ADDRESS, &[REG_CTRL1_XL, ODR_104HZ], delay::BLOCK)?;
-        i2c.write(ADDRESS, &[REG_CTRL2_G, ODR_104HZ], delay::BLOCK)?;
-
-        let mut bus = Self { i2c };
-        bus.setup_magnetometer()?;
-        Ok(bus)
+    pub fn new(i2c: I2cDriver<'static>) -> Self {
+        Self { i2c }
+    }
+    
+    pub fn init(&mut self) -> Result<(), EspError> {
+        self.i2c
+            .write(ADDRESS, &[REG_CTRL1_XL, ODR_104HZ], delay::BLOCK)?;
+        self.i2c
+            .write(ADDRESS, &[REG_CTRL2_G, ODR_104HZ], delay::BLOCK)?;
+        self.setup_magnetometer()
     }
 
     pub fn read(&mut self) -> Result<ImuReading, EspError> {
@@ -194,7 +197,15 @@ fn axes(bytes: &[u8; 6]) -> [i16; 3] {
     ]
 }
 
+const INIT_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+
 fn poll_loop(mut imu: Imu, state: Arc<State>) {
+    while let Err(e) = imu.init() {
+        log::error!("IMU init failed, retrying: {e:?}");
+        std::thread::sleep(INIT_RETRY_INTERVAL);
+    }
+    log::info!("imu initialized");
+
     loop {
         match imu.read() {
             Ok(reading) => {

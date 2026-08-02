@@ -1,5 +1,6 @@
 use crate::state::State;
 use embedded_hal::delay::DelayNs;
+use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use mcp2518fd::memory::controller::fifo::PayloadSize;
@@ -127,16 +128,20 @@ pub struct Can {
 }
 
 impl Can {
-    /// Initializes the MCP2518FD in CAN FD mode (500 kbit/s nominal, 1 Mbit/s data).
-    /// `delay` is only used here during chip mode transitions; not needed after init.
     pub fn new(
         spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
         int_pin: PinDriver<'static, Input>,
-        delay: &mut impl DelayNs,
-    ) -> Result<Self, ConfigError> {
-        let mut controller = MCP2518FD::new(spi);
-        controller.reset().map_err(ConfigError::Other)?;
-        controller.configure(
+    ) -> Self {
+        Self {
+            controller: MCP2518FD::new(spi),
+            int_pin,
+            devices: Vec::new(),
+        }
+    }
+    
+    pub fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), ConfigError> {
+        self.controller.reset().map_err(ConfigError::Other)?;
+        self.controller.configure(
             Settings {
                 oscillator: OscillatorConfiguration::default(),
                 io_configuration: IoConfiguration::new(),
@@ -155,7 +160,7 @@ impl Can {
             delay,
         )?;
 
-        controller
+        self.controller
             .configure_fifo(
                 FifoNumber::Fifo1,
                 FifoConfiguration::new(
@@ -168,7 +173,7 @@ impl Can {
             )
             .map_err(ConfigError::Other)?;
 
-        controller
+        self.controller
             .configure_fifo(
                 FifoNumber::Fifo2,
                 FifoConfiguration::new(
@@ -179,7 +184,7 @@ impl Can {
             )
             .map_err(ConfigError::Other)?;
 
-        controller
+        self.controller
             .configure_filter(
                 FilterNumber::Filter0,
                 Some(FilterConfiguration {
@@ -190,13 +195,9 @@ impl Can {
                 }),
             )
             .map_err(ConfigError::Other)?;
-        controller.set_op_mode(OperationMode::NormalCanFD, delay)?;
+        self.controller.set_op_mode(OperationMode::NormalCanFD, delay)?;
 
-        Ok(Self {
-            controller,
-            int_pin,
-            devices: Vec::new(),
-        })
+        Ok(())
     }
 
     pub fn register_can_device(&mut self, device: CanDevice) {
@@ -315,7 +316,21 @@ impl Can {
     }
 }
 
+const INIT_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+
 fn poll_loop(mut can: Can, state: Arc<State>) {
+    let mut delay = FreeRtos;
+    while let Err(e) = can.init(&mut delay) {
+        log::error!("CAN init failed, retrying: {e:?}");
+        std::thread::sleep(INIT_RETRY_INTERVAL);
+    }
+    match can.self_test(&mut delay) {
+        Ok(()) => log::info!("CAN self-test passed"),
+        Err(e) => log::error!("CAN self-test failed: {:?}", e),
+    }
+    state.status.can.store(true, Ordering::Relaxed);
+    log::info!("can initialized");
+
     loop {
         if let Err(e) = esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge()) {
             log::error!("CAN INT pin wait failed: {:?}", e);

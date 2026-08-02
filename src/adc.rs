@@ -4,6 +4,7 @@ use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::EspError;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -112,6 +113,7 @@ fn control_word(channel: u8, range: Range) -> u16 {
 }
 
 fn poll_loop(mut adc: Adc, state: Arc<State>) {
+    log::info!("adc initialized");
     loop {
         let channels: Vec<u8> = CONFIGURATION
             .lock()
@@ -129,6 +131,8 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) {
                 Err(e) => log::warn!("ADC read error on channel {ch}: {e:?}"),
             }
         }
+        
+        state.status.adc.store(!latest.is_empty(), Ordering::Relaxed);
         *state.sensors.adc.lock() = latest;
 
         std::thread::sleep(Duration::from_millis(50));
