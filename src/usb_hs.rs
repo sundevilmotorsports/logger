@@ -38,8 +38,7 @@ impl UsbHsCdc {
         Ok(n)
     }
 
-    /// `tinyusb_cdcacm_write_queue` only queues as many bytes as fit in the
-    /// TX FIFO (512 by default)
+    /// `tinyusb_cdcacm_write_queue` only queues as many bytes as fit in the TX FIFO (512 by default).
     pub fn write(&mut self, bytes: &[u8], timeout_ticks: TickType_t) -> Result<usize, EspError> {
         let mut sent = 0;
         while sent < bytes.len() {

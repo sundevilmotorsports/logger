@@ -21,9 +21,7 @@ pub struct Fix {
     pub utc: Option<NaiveDateTime>,
 }
 
-/// The most recent RMC sentence's date, needed to build a full timestamp out
-/// of GGA's time-only field. Purely an internal parsing detail of this
-/// reader thread, never read by anything outside this module.
+/// Most recent RMC date, needed to timestamp GGA's time-only field. Internal to this thread.
 static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
 
 pub struct Gnss(UartDriver<'static>);

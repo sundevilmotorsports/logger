@@ -12,12 +12,10 @@ use std::time::Duration;
 const MAX_PAYLOAD: usize = 16 * 1024;
 const CHANNEL_CAPACITY: usize = 4;
 
-/// Bytes per `LogChunk` response; the client requests successive offsets
-/// until it gets back fewer than this many bytes.
+/// Bytes per `LogChunk` response; the client requests offsets until it gets back fewer.
 const LOG_CHUNK_LEN: usize = 512;
 
-/// Set by `Command::Reboot`; checked after its ack is sent so the client
-/// gets a clean response before the device actually goes down.
+/// Set by `Command::Reboot`; checked after the ack is sent so the client gets a clean response first.
 static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Deserialize)]
@@ -41,8 +39,7 @@ enum Command {
     Reboot,
 }
 
-/// Spawns the USB reader thread and the command-dispatch thread that
-/// processes what it receives, connected by a pair of channels.
+/// Spawns the USB reader thread and the command-dispatch thread, linked by a channel pair.
 pub fn spawn(driver: UsbHsCdc, state: Arc<State>) -> bool {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);
     let (resp_tx, resp_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);

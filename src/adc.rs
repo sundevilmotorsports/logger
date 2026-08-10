@@ -12,9 +12,7 @@ use std::time::Duration;
 pub struct AdcChannel {
     pub name: String,
     pub channel: u8,
-    /// `Some` logs `scale * (raw - offset)` as a float; `None` logs the raw
-    /// 12-bit count as 2 bytes, same as a channel with no `processing` fn
-    /// in the C++ logger.
+    /// `Some` logs a scaled float; `None` logs the raw 12-bit count, matching a channel with no `processing` fn in the C++ logger.
     #[serde(default)]
     pub scale: Option<f32>,
     #[serde(default)]
@@ -53,9 +51,7 @@ pub enum AdcError {
 }
 
 /// Driver for the TI ADS7951 (12-bit, 8-channel, manual-mode SPI ADC).
-///
-/// Concrete over the board's one real SPI device rather than generic --
-/// nothing else is ever plugged in here.
+/// Concrete over the board's one SPI device -- nothing else is plugged in here.
 pub struct Adc {
     spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
     range: Range,

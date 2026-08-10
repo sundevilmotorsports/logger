@@ -78,8 +78,6 @@ impl<'d> SdCard<'d> {
         })
     }
 
-    // region writes
-
     /// Append bytes to the current log. Synced to storage on every call.
     pub fn write(&mut self, data: &[u8]) -> Result<(), EspError> {
         if self.current_file.is_none() {
@@ -130,9 +128,6 @@ impl<'d> SdCard<'d> {
         Ok(())
     }
 
-    // endregion
-    // region log management
-
     /// Flush, close the current log and open the next numbered one.
     pub fn next_log(&mut self) -> Result<(), EspError> {
         self.sync()?;
@@ -165,8 +160,6 @@ impl<'d> SdCard<'d> {
     pub fn current_name(&self) -> String {
         format!("{}{LOG_EXT}", self.log_name)
     }
-    // endregion
-    // region streaming reads
 
     /// Stream the current log in `chunk_size`-byte chunks via `cb`.
     pub fn stream_current(&mut self, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
@@ -179,9 +172,6 @@ impl<'d> SdCard<'d> {
     pub fn stream_file(&self, name: &str, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
         Self::stream_file_impl(name, chunk_size, &mut cb);
     }
-
-    // endregion
-    // region private
 
     fn write_and_sync(file: &mut File, data: &[u8]) -> Result<(), EspError> {
         file.write_all(data).map_err(|e| {
@@ -239,8 +229,6 @@ impl<'d> SdCard<'d> {
     fn log_path(base: &str) -> PathBuf {
         PathBuf::from(MOUNT_POINT).join(format!("{base}{LOG_EXT}"))
     }
-
-    // endregion
 }
 
 impl Drop for SdCard<'_> {

@@ -31,8 +31,7 @@ pub struct Signal {
     pub signed: bool,
     #[serde(default)]
     pub big_endian: bool,
-    /// `Some` logs `scale * (raw - offset)` as a float; `None` logs the raw
-    /// bytes verbatim, same as a signal with no `processing` fn in the C++ logger.
+    /// `Some` logs a scaled float; `None` logs raw bytes, matching a signal with no `processing` fn in the C++ logger.
     #[serde(default)]
     pub scale: Option<f32>,
     #[serde(default)]
@@ -114,14 +113,8 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-/// Concrete over the board's one real SPI device rather than generic --
-/// nothing else is ever plugged in here.
-///
-/// Owns `int_pin` too: the mcp2518fd crate is a pure SPI register driver, it
-/// has no idea which MCU GPIO the chip's INT line is wired to (that's board
-/// wiring, not something a transport-generic driver crate could know), so
-/// watching it for the falling edge that signals "FIFO has data" has to
-/// happen out here rather than inside the driver.
+/// Concrete over the board's one SPI device (nothing else is plugged in) and
+/// owns `int_pin`, since the driver crate has no idea which GPIO it's wired to.
 pub struct Can {
     controller: MCP2518FD<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>,
     int_pin: PinDriver<'static, Input>,
@@ -199,8 +192,7 @@ impl Can {
         Ok(())
     }
 
-    /// Drains the FIFO, returning every (signal name, raw bytes) update.
-    /// Unrecognized IDs are discarded so the FIFO never backs up.
+    /// Drains the FIFO; unrecognized IDs are discarded so it never backs up.
     pub fn poll_once(&mut self) -> Result<Vec<(String, Vec<u8>)>, Error> {
         let devices = CONFIGURATION.lock().can_devices.clone();
 
@@ -250,8 +242,7 @@ fn collect_updates(
 }
 
 impl Can {
-    /// Verifies the TX/RX path using the controller's internal loopback mode:
-    /// transmits a known frame and checks it comes back unchanged
+    /// Verifies TX/RX via internal loopback: sends a known frame, checks it comes back unchanged.
     pub fn self_test(&mut self, delay: &mut impl DelayNs) -> Result<(), SelfTestError> {
         const TEST_ID: u16 = 0x123;
         const TEST_DATA: [u8; 8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x01, 0x02, 0x03, 0x04];

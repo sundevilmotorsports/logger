@@ -5,8 +5,7 @@ use std::time::Duration;
 const LP_SYSTEM_REG_SYS_CTRL_REG: *mut u32 = 0x5011_0008 as *mut u32;
 const FORCE_DOWNLOAD_BOOT: u32 = 1 << 2;
 
-/// Set by the USB line-state-changed callback (usb_hs.rs) when it sees an
-/// espflash-style reset pulse.
+/// Set by usb_hs.rs's line-state callback when it sees an espflash-style reset pulse.
 pub static REQUESTED: AtomicBool = AtomicBool::new(false);
 
 /// Sets the force-download-boot bit and restarts

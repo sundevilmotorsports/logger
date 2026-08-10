@@ -23,8 +23,7 @@ const REG_OUT_TEMP_L: u8 = 0x20;
 const REG_OUTX_L_G: u8 = 0x22;
 const REG_OUTX_L_A: u8 = 0x28;
 
-/// FUNC_CFG_ACCESS.reg_access values (bits 7:6) that switch which bank
-/// addresses 0x02-0x22 refer to.
+/// FUNC_CFG_ACCESS.reg_access bits 7:6 select which bank addresses 0x02-0x22 refer to.
 const BANK_USER: u8 = 0x00;
 const BANK_SENSOR_HUB: u8 = 0x01 << 6;
 
@@ -45,8 +44,7 @@ const MASTER_CONFIG_CONTINUOUS_READ: u8 = 0b0000_1100;
 /// STATUS_MASTER bit7: the one-shot write completed.
 const STATUS_WR_ONCE_DONE: u8 = 0x80;
 
-/// IIS2MDC magnetometer, reachable only via the ISM330DHCX's sensor-hub
-/// (aux I2C master), not directly from the main bus.
+/// IIS2MDC magnetometer, reachable only via the ISM330DHCX's sensor-hub (aux I2C master).
 const MAG_ADDRESS: u8 = 0x1e;
 const MAG_REG_CFG_REG_A: u8 = 0x60;
 const MAG_REG_OUTX_L: u8 = 0x68;
@@ -112,9 +110,7 @@ impl Imu {
         Ok(axes(&buf).map(|raw| raw as f32 * MAG_SENSITIVITY_UT))
     }
 
-    /// Runs `f` with FUNC_CFG_ACCESS switched into the sensor-hub bank
-    /// (where MASTER_CONFIG/SLV0_*/SENSOR_HUB1-18 live), then always
-    /// switches back to the user bank before returning.
+    /// Runs `f` inside the sensor-hub register bank, then always switches back to the user bank.
     fn with_shub_bank<T>(
         &mut self,
         f: impl FnOnce(&mut I2cDriver<'static>) -> Result<T, EspError>,

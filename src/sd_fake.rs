@@ -6,9 +6,6 @@ use std::sync::LazyLock;
 
 const LOG_EXT: &str = ".bin";
 
-// Real SD hardware is dead (CMD/CLK nets open on the board) -> in-memory fake
-// stands in until it's fixed. A global so both the log writer and serial
-// command handler (list/download logs) can reach the same instance.
 pub static SD: LazyLock<Mutex<FakeSdCard>> = LazyLock::new(|| Mutex::new(FakeSdCard::new()));
 
 pub struct FakeSdCard {
@@ -59,9 +56,7 @@ impl FakeSdCard {
         }
     }
 
-    /// Up to `len` bytes of `name` starting at `offset`, or `None` if `name`
-    /// doesn't exist. An `offset` at or past the end of the file yields
-    /// `Some(&[])`, signaling a clean end-of-file rather than an error.
+    /// Bytes of `name` from `offset`; `None` if missing, `Some(&[])` at EOF.
     pub fn read_chunk(&self, name: &str, offset: u64, len: usize) -> Option<&[u8]> {
         let data = self.files.get(name)?;
         let start = (offset as usize).min(data.len());
