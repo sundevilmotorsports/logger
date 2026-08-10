@@ -10,12 +10,9 @@ use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::sys::esp_timer_get_time;
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
-
-/// Whether the logging thread writes rows; toggled via the `set_logging` command.
-pub static ACTIVE: AtomicBool = AtomicBool::new(true);
 
 /// Header: [1] num_columns, then per column [1] name_len, [name_len] name,
 /// [1] type tag (0 = 4-byte float, N>0 = N raw bytes). Rows: fixed-width,
@@ -237,8 +234,8 @@ const LOG_HZ: u32 = 20;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
 fn logger_thread(state: Arc<State>) {
-    let can_signals = configured_can_signals();
-    let adc_channels = configured_adc_channels();
+    let mut can_signals = configured_can_signals();
+    let mut adc_channels = configured_adc_channels();
 
     // Empty so the schema is (re)written on the first tick and after every `next_log`.
     let mut current_name = String::new();
@@ -248,7 +245,17 @@ fn logger_thread(state: Arc<State>) {
     loop {
         next_tick += LOG_PERIOD;
 
-        if ACTIVE.load(Ordering::Relaxed) {
+        if state.logging.config_changed.swap(false, Ordering::Relaxed) {
+            can_signals = configured_can_signals();
+            adc_channels = configured_adc_channels();
+            // Only roll over if a log is actually underway
+            if !current_name.is_empty() {
+                SD.lock().next_log().ok();
+                current_name.clear();
+            }
+        }
+
+        if state.logging.active.load(Ordering::Relaxed) {
             let sources = snapshot(&can_signals, &adc_channels, &state);
             let mut sd = SD.lock();
             if sd.current_name() != current_name {

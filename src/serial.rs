@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, CONFIGURATION};
 use crate::state::State;
 use crate::usb_hs::UsbHsCdc;
-use crate::{logging, sd_fake};
+use crate::sd_fake;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
 use serde::Deserialize;
@@ -122,6 +122,7 @@ fn handle_command(payload: &str, state: &State) -> String {
             guard.can_devices = args.can_devices;
             guard.adc_channels = args.adc_channels;
             drop(guard);
+            state.logging.config_changed.store(true, Ordering::Relaxed);
             ok(serde_json::Value::Null)
         }
 
@@ -178,13 +179,13 @@ fn handle_command(payload: &str, state: &State) -> String {
         Command::LogStatus => {
             let current = sd_fake::SD.lock().current_name();
             ok(serde_json::json!({
-                "active": logging::ACTIVE.load(std::sync::atomic::Ordering::Relaxed),
+                "active": state.logging.active.load(Ordering::Relaxed),
                 "current": current,
             }))
         }
 
         Command::SetLogging { active } => {
-            logging::ACTIVE.store(active, std::sync::atomic::Ordering::Relaxed);
+            state.logging.active.store(active, Ordering::Relaxed);
             ok(serde_json::Value::Null)
         }
 
