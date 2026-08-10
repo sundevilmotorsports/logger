@@ -202,8 +202,7 @@ impl Can {
     /// Drains the FIFO, returning every (signal name, raw bytes) update.
     /// Unrecognized IDs are discarded so the FIFO never backs up.
     pub fn poll_once(&mut self) -> Result<Vec<(String, Vec<u8>)>, Error> {
-        let config = CONFIGURATION.lock();
-        let devices = &config.can_devices;
+        let devices = CONFIGURATION.lock().can_devices.clone();
 
         let mut updates = Vec::new();
         loop {
@@ -214,7 +213,7 @@ impl Can {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
-            collect_updates(devices, raw_id, extended, msg.data(), &mut updates);
+            collect_updates(&devices, raw_id, extended, msg.data(), &mut updates);
         }
         Ok(updates)
     }
