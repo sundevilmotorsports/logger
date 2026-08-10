@@ -1,3 +1,4 @@
+use crate::configuration::CONFIGURATION;
 use crate::state::State;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::delay::FreeRtos;
@@ -124,7 +125,6 @@ pub struct CanDevice {
 pub struct Can {
     controller: MCP2518FD<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>,
     int_pin: PinDriver<'static, Input>,
-    devices: Vec<CanDevice>,
 }
 
 impl Can {
@@ -135,7 +135,6 @@ impl Can {
         Self {
             controller: MCP2518FD::new(spi),
             int_pin,
-            devices: Vec::new(),
         }
     }
     
@@ -200,13 +199,12 @@ impl Can {
         Ok(())
     }
 
-    pub fn register_can_device(&mut self, device: CanDevice) {
-        self.devices.push(device);
-    }
-
     /// Drains the FIFO, returning every (signal name, raw bytes) update.
     /// Unrecognized IDs are discarded so the FIFO never backs up.
     pub fn poll_once(&mut self) -> Result<Vec<(String, Vec<u8>)>, Error> {
+        let config = CONFIGURATION.lock();
+        let devices = &config.can_devices;
+
         let mut updates = Vec::new();
         loop {
             let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? else {
@@ -216,45 +214,43 @@ impl Can {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
-            self.collect_updates(raw_id, extended, msg.data(), &mut updates);
+            collect_updates(devices, raw_id, extended, msg.data(), &mut updates);
         }
         Ok(updates)
     }
+}
 
-    fn collect_updates(
-        &self,
-        raw_id: u32,
-        extended: bool,
-        data: &[u8],
-        out: &mut Vec<(String, Vec<u8>)>,
-    ) {
-        let Some(device) = self
-            .devices
-            .iter()
-            .find(|d| d.id == raw_id && d.extended == extended)
-        else {
-            return;
-        };
-        let active_signals: &[Signal] = match &device.signals {
-            Signals::Fixed(sigs) => sigs,
-            Signals::Muxed { byte, groups } => {
-                let type_val = *data.get(*byte).unwrap_or(&0);
-                match groups.iter().find(|g| g.type_val == type_val) {
-                    Some(g) => &g.signals,
-                    None => return,
-                }
-            }
-        };
-        for sig in active_signals {
-            if sig.start + sig.len <= data.len() {
-                out.push((
-                    sig.name.clone(),
-                    data[sig.start..sig.start + sig.len].to_vec(),
-                ));
+fn collect_updates(
+    devices: &[CanDevice],
+    raw_id: u32,
+    extended: bool,
+    data: &[u8],
+    out: &mut Vec<(String, Vec<u8>)>,
+) {
+    let Some(device) = devices.iter().find(|d| d.id == raw_id && d.extended == extended) else {
+        return;
+    };
+    let active_signals: &[Signal] = match &device.signals {
+        Signals::Fixed(sigs) => sigs,
+        Signals::Muxed { byte, groups } => {
+            let type_val = *data.get(*byte).unwrap_or(&0);
+            match groups.iter().find(|g| g.type_val == type_val) {
+                Some(g) => &g.signals,
+                None => return,
             }
         }
+    };
+    for sig in active_signals {
+        if sig.start + sig.len <= data.len() {
+            out.push((
+                sig.name.clone(),
+                data[sig.start..sig.start + sig.len].to_vec(),
+            ));
+        }
     }
+}
 
+impl Can {
     /// Verifies the TX/RX path using the controller's internal loopback mode:
     /// transmits a known frame and checks it comes back unchanged
     pub fn self_test(&mut self, delay: &mut impl DelayNs) -> Result<(), SelfTestError> {
