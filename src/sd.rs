@@ -1,6 +1,7 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 use esp_idf_svc::fs::fatfs::Fatfs;
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
@@ -9,33 +10,36 @@ use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
 use esp_idf_svc::sys::EspError;
 use log::{error, info};
+use parking_lot::Mutex;
 
 const MOUNT_POINT: &str = "/sdcard";
 const LOG_EXT: &str = ".bin";
 
-type Vfs<'d> = MountedFatfs<Fatfs<SdCardDriver<SdMmcHostDriver<'d>>>>;
+static SD: OnceLock<Mutex<SdCard>> = OnceLock::new();
 
-pub struct SdCard<'d> {
+type Vfs = MountedFatfs<Fatfs<SdCardDriver<SdMmcHostDriver<'static>>>>;
+
+pub struct SdCard {
     current_file: Option<File>,
     write_buf: [u8; 512],
     write_buf_len: usize,
     log_name: String,
-    _vfs: Vfs<'d>,
+    _vfs: Vfs,
 }
 
-impl<'d> SdCard<'d> {
-    pub fn new(
-        slot: impl SdMmc + 'd,
-        cmd: impl OutputPin + 'd,
-        clk: impl OutputPin + 'd,
-        d0: impl InputPin + OutputPin + 'd,
-        d1: impl InputPin + OutputPin + 'd,
-        d2: impl InputPin + OutputPin + 'd,
-        d3: impl InputPin + OutputPin + 'd,
-        cd: Option<impl InputPin + 'd>,
-        wp: Option<impl InputPin + 'd>,
+impl SdCard {
+    pub fn init(
+        slot: impl SdMmc + 'static,
+        cmd: impl OutputPin + 'static,
+        clk: impl OutputPin + 'static,
+        d0: impl InputPin + OutputPin + 'static,
+        d1: impl InputPin + OutputPin + 'static,
+        d2: impl InputPin + OutputPin + 'static,
+        d3: impl InputPin + OutputPin + 'static,
+        cd: Option<impl InputPin + 'static>,
+        wp: Option<impl InputPin + 'static>,
         config: &SdCardConfiguration,
-    ) -> Result<Self, EspError> {
+    ) -> Result<(), EspError> {
         let host = SdMmcHostDriver::new_4bits(
             slot,
             cmd,
@@ -48,11 +52,18 @@ impl<'d> SdCard<'d> {
             wp,
             &Default::default(),
         )?;
-        Self::from_host(host, config)
+        let card = Self::build(host, config)?;
+
+        if SD.set(Mutex::new(card)).is_err() {
+            error!("SD card already initialized");
+            return Err(EspError::from_infallible::<-1>());
+        }
+
+        Ok(())
     }
 
-    fn from_host(
-        host: SdMmcHostDriver<'d>,
+    fn build(
+        host: SdMmcHostDriver<'static>,
         config: &SdCardConfiguration,
     ) -> Result<Self, EspError> {
         let card = SdCardDriver::new_mmc(host, config)?;
@@ -78,8 +89,59 @@ impl<'d> SdCard<'d> {
         })
     }
 
+    fn instance() -> Result<&'static Mutex<SdCard>, EspError> {
+        SD.get().ok_or_else(|| {
+            error!("SD card not initialized");
+            EspError::from_infallible::<-1>()
+        })
+    }
+
     /// Append bytes to the current log. Synced to storage on every call.
-    pub fn write(&mut self, data: &[u8]) -> Result<(), EspError> {
+    pub fn write(data: &[u8]) -> Result<(), EspError> {
+        Self::instance()?.lock().write_buffered(data)
+    }
+
+    /// Flush any buffered data without closing the file.
+    pub fn sync() -> Result<(), EspError> {
+        Self::instance()?.lock().sync_buffer()
+    }
+
+    /// Flush, close the current log and open the next numbered one.
+    pub fn next_log() -> Result<(), EspError> {
+        Self::instance()?.lock().roll()
+    }
+
+    /// List all `.bin` files on the card.
+    pub fn list_logs() -> Vec<String> {
+        Self::read_dir_logs()
+    }
+
+    /// Size in bytes of a named file. Returns 0 if not found.
+    pub fn file_size(name: &str) -> u64 {
+        fs::metadata(PathBuf::from(MOUNT_POINT).join(name))
+            .map(|m| m.len())
+            .unwrap_or(0)
+    }
+
+    /// File name of the current log, or `None` if the card isn't initialized.
+    pub fn current_name() -> Option<String> {
+        SD.get().map(|sd| sd.lock().name())
+    }
+
+    /// Stream the current log in `chunk_size`-byte chunks via `cb`.
+    pub fn stream_current(chunk_size: usize, cb: impl FnMut(&[u8])) {
+        match SD.get() {
+            Some(sd) => sd.lock().stream_current_impl(chunk_size, cb),
+            None => error!("SD card not initialized"),
+        }
+    }
+
+    /// Stream any named file in `chunk_size`-byte chunks via `cb`.
+    pub fn stream_file(name: &str, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
+        Self::stream_file_impl(name, chunk_size, &mut cb);
+    }
+
+    fn write_buffered(&mut self, data: &[u8]) -> Result<(), EspError> {
         if self.current_file.is_none() {
             return Err(EspError::from_infallible::<-1>());
         }
@@ -114,8 +176,7 @@ impl<'d> SdCard<'d> {
         Ok(())
     }
 
-    /// Flush any buffered data without closing the file.
-    pub fn sync(&mut self) -> Result<(), EspError> {
+    fn sync_buffer(&mut self) -> Result<(), EspError> {
         if self.write_buf_len > 0 {
             let len = self.write_buf_len;
             let f = self
@@ -128,9 +189,8 @@ impl<'d> SdCard<'d> {
         Ok(())
     }
 
-    /// Flush, close the current log and open the next numbered one.
-    pub fn next_log(&mut self) -> Result<(), EspError> {
-        self.sync()?;
+    fn roll(&mut self) -> Result<(), EspError> {
+        self.sync_buffer()?;
         self.current_file = None;
 
         self.log_name = format!("{:04}", Self::next_index());
@@ -144,33 +204,14 @@ impl<'d> SdCard<'d> {
         Ok(())
     }
 
-    /// List all `.bin` files on the card.
-    pub fn list_logs(&self) -> Vec<String> {
-        Self::read_dir_logs()
-    }
-
-    /// Size in bytes of a named file. Returns 0 if not found.
-    pub fn file_size(&self, name: &str) -> u64 {
-        fs::metadata(PathBuf::from(MOUNT_POINT).join(name))
-            .map(|m| m.len())
-            .unwrap_or(0)
-    }
-
-    /// File name of the current log
-    pub fn current_name(&self) -> String {
+    fn name(&self) -> String {
         format!("{}{LOG_EXT}", self.log_name)
     }
 
-    /// Stream the current log in `chunk_size`-byte chunks via `cb`.
-    pub fn stream_current(&mut self, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
-        self.sync().ok();
-        let name = self.current_name();
+    fn stream_current_impl(&mut self, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
+        self.sync_buffer().ok();
+        let name = self.name();
         Self::stream_file_impl(&name, chunk_size, &mut cb);
-    }
-
-    /// Stream any named file in `chunk_size`-byte chunks via `cb`.
-    pub fn stream_file(&self, name: &str, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
-        Self::stream_file_impl(name, chunk_size, &mut cb);
     }
 
     fn write_and_sync(file: &mut File, data: &[u8]) -> Result<(), EspError> {
@@ -231,8 +272,12 @@ impl<'d> SdCard<'d> {
     }
 }
 
-impl Drop for SdCard<'_> {
+impl Drop for SdCard {
     fn drop(&mut self) {
-        self.sync().ok();
+        self.sync_buffer().ok();
     }
 }
+
+// SAFETY: all access goes through `SD`'s `Mutex`, so the driver's internal
+// pointers are never touched by more than one thread at a time.
+unsafe impl Send for SdCard {}
