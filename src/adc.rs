@@ -127,8 +127,11 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) {
                 Err(e) => log::warn!("ADC read error on channel {ch}: {e:?}"),
             }
         }
-        
-        state.status.adc.store(!latest.is_empty(), Ordering::Relaxed);
+
+        state
+            .status
+            .adc
+            .store(!latest.is_empty(), Ordering::Relaxed);
         *state.sensors.adc.lock() = latest;
 
         std::thread::sleep(Duration::from_millis(50));

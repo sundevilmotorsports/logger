@@ -69,7 +69,7 @@ impl Imu {
     pub fn new(i2c: I2cDriver<'static>) -> Self {
         Self { i2c }
     }
-    
+
     pub fn init(&mut self) -> Result<(), EspError> {
         self.i2c
             .write(ADDRESS, &[REG_CTRL1_XL, ODR_104HZ], delay::BLOCK)?;

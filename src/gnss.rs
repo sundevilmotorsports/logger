@@ -93,8 +93,11 @@ fn parse_gga(line: &str) -> Option<Fix> {
         return None; // no fix yet
     }
 
-    let utc = parse_time(f[1])
-        .and_then(|time| LATEST_DATE.lock().map(|date| NaiveDateTime::new(date, time)));
+    let utc = parse_time(f[1]).and_then(|time| {
+        LATEST_DATE
+            .lock()
+            .map(|date| NaiveDateTime::new(date, time))
+    });
 
     Some(Fix {
         lat: dm_to_deg(f[2])? * if f[3] == "S" { -1.0 } else { 1.0 },

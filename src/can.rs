@@ -130,7 +130,7 @@ impl Can {
             int_pin,
         }
     }
-    
+
     pub fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), ConfigError> {
         self.controller.reset().map_err(ConfigError::Other)?;
         self.controller.configure(
@@ -187,7 +187,8 @@ impl Can {
                 }),
             )
             .map_err(ConfigError::Other)?;
-        self.controller.set_op_mode(OperationMode::NormalCanFD, delay)?;
+        self.controller
+            .set_op_mode(OperationMode::NormalCanFD, delay)?;
 
         Ok(())
     }
@@ -218,7 +219,10 @@ fn collect_updates(
     data: &[u8],
     out: &mut Vec<(String, Vec<u8>)>,
 ) {
-    let Some(device) = devices.iter().find(|d| d.id == raw_id && d.extended == extended) else {
+    let Some(device) = devices
+        .iter()
+        .find(|d| d.id == raw_id && d.extended == extended)
+    else {
         return;
     };
     let active_signals: &[Signal] = match &device.signals {

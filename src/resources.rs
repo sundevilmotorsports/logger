@@ -44,7 +44,10 @@ impl ResourceMonitor {
             _ => [0.0f32; NUM_CORES],
         };
 
-        self.prev = Some(PrevSample { at_us: now_us, idle_us });
+        self.prev = Some(PrevSample {
+            at_us: now_us,
+            idle_us,
+        });
 
         Resources {
             heap_free: unsafe { esp_get_free_heap_size() },
