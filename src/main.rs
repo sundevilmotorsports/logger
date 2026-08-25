@@ -7,7 +7,6 @@ mod imu;
 mod logging;
 mod resources;
 mod sd;
-mod sd_fake;
 mod serial;
 mod state;
 mod status;
@@ -19,6 +18,8 @@ use configuration::Configuration;
 use esp_idf_svc::hal::gpio::{InputPin, OutputPin, PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2c as I2cPeripheral, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
+use esp_idf_svc::hal::sd::mmc::SdMmc;
+use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::{
     config::Config as SpiConfig, SpiAnyPins, SpiDeviceDriver, SpiDriver, SpiDriverConfig,
 };
@@ -27,6 +28,7 @@ use esp_idf_svc::hal::units::Hertz;
 use gnss::Gnss;
 use imu::Imu;
 use log::info;
+use sd::SdCard;
 use state::State;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -146,6 +148,32 @@ fn init_imu(
         .inspect_err(|e| log::error!("I2C driver init failed: {e:?}"))
         .ok()?;
     Some(Imu::new(i2c))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn init_sd(
+    slot: impl SdMmc + 'static,
+    cmd: impl OutputPin + 'static,
+    clk: impl OutputPin + 'static,
+    d0: impl InputPin + OutputPin + 'static,
+    d1: impl InputPin + OutputPin + 'static,
+    d2: impl InputPin + OutputPin + 'static,
+    d3: impl InputPin + OutputPin + 'static,
+) -> bool {
+    SdCard::init(
+        slot,
+        cmd,
+        clk,
+        d0,
+        d1,
+        d2,
+        d3,
+        None::<esp_idf_svc::hal::gpio::AnyIOPin>,
+        None::<esp_idf_svc::hal::gpio::AnyIOPin>,
+        &SdCardConfiguration::new(),
+    )
+    .inspect_err(|e| log::error!("SD card init failed: {e:?}"))
+    .is_ok()
 }
 
 fn init_gnss(

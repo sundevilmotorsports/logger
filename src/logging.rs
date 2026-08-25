@@ -3,7 +3,7 @@ use crate::can::{Signal, SignalValue, Signals};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
-use crate::sd_fake::SD;
+use crate::sd::SdCard;
 use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
@@ -249,22 +249,31 @@ fn logger_thread(state: Arc<State>) {
             adc_channels = configured_adc_channels();
             // Only roll over if a log is actually underway
             if !current_name.is_empty() {
-                SD.lock().next_log().ok();
+                SdCard::next_log().ok();
                 current_name.clear();
             }
         }
 
         if state.logging.active.load(Ordering::Relaxed) {
             let sources = snapshot(&can_signals, &adc_channels, &state);
-            let mut sd = SD.lock();
-            if sd.current_name() != current_name {
-                if let Err(e) = write_schema(&mut *sd, &sources) {
-                    log::error!("failed to write log schema: {e}");
+            let name = SdCard::current_name().unwrap_or_default();
+
+            if name != current_name {
+                let mut buf = Vec::new();
+                if let Err(e) = write_schema(&mut buf, &sources) {
+                    log::error!("failed to build log schema: {e}");
+                } else if let Err(e) = SdCard::write(&buf) {
+                    log::error!("failed to write log schema: {e:?}");
+                } else {
+                    current_name = name;
                 }
-                current_name = sd.current_name();
             }
-            if let Err(e) = write_row(&mut *sd, &sources) {
-                log::warn!("failed to write log row: {e}");
+
+            let mut buf = Vec::new();
+            if let Err(e) = write_row(&mut buf, &sources) {
+                log::warn!("failed to build log row: {e}");
+            } else if let Err(e) = SdCard::write(&buf) {
+                log::warn!("failed to write log row: {e:?}");
             }
         }
 

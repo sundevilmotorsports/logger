@@ -1,7 +1,7 @@
 use crate::configuration::{Configuration, CONFIGURATION};
+use crate::sd::SdCard;
 use crate::state::State;
 use crate::usb_hs::UsbHsCdc;
-use crate::sd_fake;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
 use serde::Deserialize;
@@ -60,7 +60,11 @@ pub fn spawn(driver: UsbHsCdc, state: Arc<State>) -> bool {
         .is_ok()
 }
 
-fn dispatch_thread(state: Arc<State>, cmd_rx: mpsc::Receiver<String>, resp_tx: mpsc::SyncSender<String>) {
+fn dispatch_thread(
+    state: Arc<State>,
+    cmd_rx: mpsc::Receiver<String>,
+    resp_tx: mpsc::SyncSender<String>,
+) {
     while let Ok(payload) = cmd_rx.recv() {
         let response = handle_command(&payload, &state);
         if resp_tx.send(response).is_err() {
@@ -149,24 +153,23 @@ fn handle_command(payload: &str, state: &State) -> String {
             None => err("no imu".into()),
         },
 
-        Command::Resources => ok(serde_json::to_value(state.resources.lock().sample()).unwrap_or_default()),
+        Command::Resources => {
+            ok(serde_json::to_value(state.resources.lock().sample()).unwrap_or_default())
+        }
 
         Command::ListLogs => {
-            let sd = sd_fake::SD.lock();
-            let logs: Vec<_> = sd
-                .list_logs()
+            let logs: Vec<_> = SdCard::list_logs()
                 .iter()
-                .map(|name| serde_json::json!({"name": name, "size": sd.file_size(name)}))
+                .map(|name| serde_json::json!({"name": name, "size": SdCard::file_size(name)}))
                 .collect();
             ok(serde_json::json!(logs))
         }
 
         Command::LogChunk { name, offset } => {
-            let sd = sd_fake::SD.lock();
-            match sd.read_chunk(&name, offset, LOG_CHUNK_LEN) {
+            match SdCard::read_chunk(&name, offset, LOG_CHUNK_LEN) {
                 // Hex-encoded since the log is binary now, not ASCII.
                 Some(chunk) => ok(serde_json::json!({
-                    "data": hex_encode(chunk),
+                    "data": hex_encode(&chunk),
                     "eof": chunk.len() < LOG_CHUNK_LEN,
                 })),
                 None => err(format!("no such log: {name}")),
@@ -174,7 +177,7 @@ fn handle_command(payload: &str, state: &State) -> String {
         }
 
         Command::LogStatus => {
-            let current = sd_fake::SD.lock().current_name();
+            let current = SdCard::current_name().unwrap_or_default();
             ok(serde_json::json!({
                 "active": state.logging.active.load(Ordering::Relaxed),
                 "current": current,
@@ -187,7 +190,7 @@ fn handle_command(payload: &str, state: &State) -> String {
         }
 
         Command::NextLog => {
-            sd_fake::SD.lock().next_log().ok();
+            SdCard::next_log().ok();
             ok(serde_json::Value::Null)
         }
 
@@ -198,7 +201,11 @@ fn handle_command(payload: &str, state: &State) -> String {
     }
 }
 
-fn reader_thread(mut driver: UsbHsCdc, cmd_tx: mpsc::SyncSender<String>, resp_rx: mpsc::Receiver<String>) {
+fn reader_thread(
+    mut driver: UsbHsCdc,
+    cmd_tx: mpsc::SyncSender<String>,
+    resp_rx: mpsc::Receiver<String>,
+) {
     use embedded_hal::delay::DelayNs;
 
     let mut buf = Vec::<u8>::new();

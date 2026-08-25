@@ -1,5 +1,5 @@
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -128,17 +128,18 @@ impl SdCard {
         SD.get().map(|sd| sd.lock().name())
     }
 
-    /// Stream the current log in `chunk_size`-byte chunks via `cb`.
-    pub fn stream_current(chunk_size: usize, cb: impl FnMut(&[u8])) {
-        match SD.get() {
-            Some(sd) => sd.lock().stream_current_impl(chunk_size, cb),
-            None => error!("SD card not initialized"),
-        }
-    }
-
-    /// Stream any named file in `chunk_size`-byte chunks via `cb`.
-    pub fn stream_file(name: &str, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
-        Self::stream_file_impl(name, chunk_size, &mut cb);
+    /// Up to `len` bytes of `name` starting at `offset`. `None` if the file
+    /// doesn't exist; `Some(&[])` (shorter than `len`) at EOF.
+    pub fn read_chunk(name: &str, offset: u64, len: usize) -> Option<Vec<u8>> {
+        // Flush the current log's buffer first so its tail is visible to readers.
+        Self::sync().ok();
+        let path = PathBuf::from(MOUNT_POINT).join(name);
+        let mut file = File::open(&path).ok()?;
+        file.seek(SeekFrom::Start(offset)).ok()?;
+        let mut buf = vec![0u8; len];
+        let n = file.read(&mut buf).ok()?;
+        buf.truncate(n);
+        Some(buf)
     }
 
     fn write_buffered(&mut self, data: &[u8]) -> Result<(), EspError> {
@@ -208,12 +209,6 @@ impl SdCard {
         format!("{}{LOG_EXT}", self.log_name)
     }
 
-    fn stream_current_impl(&mut self, chunk_size: usize, mut cb: impl FnMut(&[u8])) {
-        self.sync_buffer().ok();
-        let name = self.name();
-        Self::stream_file_impl(&name, chunk_size, &mut cb);
-    }
-
     fn write_and_sync(file: &mut File, data: &[u8]) -> Result<(), EspError> {
         file.write_all(data).map_err(|e| {
             error!("Write failed: {e}");
@@ -223,20 +218,6 @@ impl SdCard {
             error!("Sync failed: {e}");
             EspError::from_infallible::<-1>()
         })
-    }
-
-    fn stream_file_impl(name: &str, chunk_size: usize, cb: &mut impl FnMut(&[u8])) {
-        let path = PathBuf::from(MOUNT_POINT).join(name);
-        let Ok(mut file) = File::open(&path) else {
-            return;
-        };
-        let mut buf = vec![0u8; chunk_size];
-        loop {
-            match file.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => cb(&buf[..n]),
-            }
-        }
     }
 
     fn read_dir_logs() -> Vec<String> {
