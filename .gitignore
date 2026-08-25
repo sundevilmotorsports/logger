@@ -2,3 +2,6 @@
 /.embuild
 /target
 /Cargo.lock
+components_esp32*
+/.idea
+.DS_Store
