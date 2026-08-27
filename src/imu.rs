@@ -178,7 +178,7 @@ impl Imu {
     pub fn spawn(self, state: Arc<State>) -> bool {
         std::thread::Builder::new()
             .stack_size(8192)
-            .spawn(move || poll_loop(self, state))
+            .spawn(move || run(self, state))
             .inspect_err(|e| log::error!("imu thread spawn failed: {e:?}"))
             .is_ok()
     }
@@ -193,26 +193,17 @@ fn axes(bytes: &[u8; 6]) -> [i16; 3] {
     ]
 }
 
-const INIT_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+fn run(mut imu: Imu, state: Arc<State>) -> ! {
+    crate::supervisor::run(move || -> Result<(), EspError> {
+        state.status.imu.store(false, Ordering::Relaxed);
+        imu.init()?;
+        log::info!("imu initialized");
 
-fn poll_loop(mut imu: Imu, state: Arc<State>) {
-    while let Err(e) = imu.init() {
-        log::error!("IMU init failed, retrying: {e:?}");
-        std::thread::sleep(INIT_RETRY_INTERVAL);
-    }
-    log::info!("imu initialized");
-
-    loop {
-        match imu.read() {
-            Ok(reading) => {
-                *state.sensors.imu.lock() = Some(reading);
-                state.status.imu.store(true, Ordering::Relaxed);
-            }
-            Err(e) => {
-                log::warn!("IMU read error: {e:?}");
-                state.status.imu.store(false, Ordering::Relaxed);
-            }
+        loop {
+            let reading = imu.read()?;
+            *state.sensors.imu.lock() = Some(reading);
+            state.status.imu.store(true, Ordering::Relaxed);
+            std::thread::sleep(Duration::from_millis(50));
         }
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }

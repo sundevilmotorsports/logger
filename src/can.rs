@@ -19,7 +19,6 @@ use mcp2518fd::{
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Signal {
@@ -300,52 +299,46 @@ impl Can {
     pub fn spawn(self, state: Arc<State>) -> bool {
         std::thread::Builder::new()
             .stack_size(8192)
-            .spawn(move || poll_loop(self, state))
+            .spawn(move || run(self, state))
             .inspect_err(|e| log::error!("can thread spawn failed: {e:?}"))
             .is_ok()
     }
 }
 
-const INIT_RETRY_INTERVAL: Duration = Duration::from_secs(3);
+/// Init failure or a comm error partway through both land here, so either one
+/// restarts the controller from scratch via `crate::supervisor::run`.
+#[derive(Debug)]
+enum RunError {
+    Init(ConfigError),
+    Pin(esp_idf_svc::sys::EspError),
+    Comm(Error),
+}
 
-fn poll_loop(mut can: Can, state: Arc<State>) {
+fn run(mut can: Can, state: Arc<State>) -> ! {
     let mut delay = FreeRtos;
-    while let Err(e) = can.init(&mut delay) {
-        log::error!("CAN init failed, retrying: {e:?}");
-        std::thread::sleep(INIT_RETRY_INTERVAL);
-    }
-    match can.self_test(&mut delay) {
-        Ok(()) => log::info!("CAN self-test passed"),
-        Err(e) => log::error!("CAN self-test failed: {:?}", e),
-    }
-    state.status.can.store(true, Ordering::Relaxed);
-    log::info!("can initialized");
-
-    loop {
-        if let Err(e) = esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge()) {
-            log::error!("CAN INT pin wait failed: {:?}", e);
-            std::thread::sleep(Duration::from_millis(500));
-            continue;
+    crate::supervisor::run(move || -> Result<(), RunError> {
+        state.status.can.store(false, Ordering::Relaxed);
+        can.init(&mut delay).map_err(RunError::Init)?;
+        match can.self_test(&mut delay) {
+            Ok(()) => log::info!("CAN self-test passed"),
+            Err(e) => log::error!("CAN self-test failed: {:?}", e),
         }
+        state.status.can.store(true, Ordering::Relaxed);
+        log::info!("can initialized");
 
-        let updates = match can.poll_once() {
-            Ok(updates) => {
-                state.status.can.store(true, Ordering::Relaxed);
-                updates
-            }
-            Err(e) => {
-                log::warn!("CAN poll error: {:?}", e);
-                state.status.can.store(false, Ordering::Relaxed);
-                continue;
-            }
-        };
-        if !updates.is_empty() {
-            let mut latest = state.sensors.can.lock();
-            for (name, bytes) in updates {
-                latest.insert(name, bytes);
+        loop {
+            esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge())
+                .map_err(RunError::Pin)?;
+
+            let updates = can.poll_once().map_err(RunError::Comm)?;
+            if !updates.is_empty() {
+                let mut latest = state.sensors.can.lock();
+                for (name, bytes) in updates {
+                    latest.insert(name, bytes);
+                }
             }
         }
-    }
+    })
 }
 
 #[derive(Debug)]

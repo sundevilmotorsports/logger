@@ -10,6 +10,7 @@ mod sd;
 mod serial;
 mod state;
 mod status;
+mod supervisor;
 mod usb_hs;
 
 use adc::Adc;
