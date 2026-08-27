@@ -14,7 +14,7 @@ use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Header: [1] num_columns, then per column [name_len][name][type tag]
+/// Header: \[1\] num_columns, then per column \[name_len\]\[name\]\[type tag\]
 /// (0 = float, N>0 = N raw bytes). Rows follow, fixed-width, same column order.
 enum ColType {
     Float,
