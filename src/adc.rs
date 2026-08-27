@@ -34,12 +34,14 @@ impl AdcChannel {
 }
 
 /// 0-2.5V or 0-5V unipolar input range, set once for the whole chip.
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Range {
     R2_5V,
     R5V,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum AdcError {
     Spi(EspError),

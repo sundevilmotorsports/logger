@@ -41,10 +41,12 @@ impl Configuration {
         }
     }
 
+    #[allow(dead_code)]
     pub fn nvs(&self) -> Option<&EspDefaultNvs> {
         self.nvs.as_ref()
     }
 
+    #[allow(dead_code)]
     pub fn nvs_mut(&mut self) -> Option<&mut EspDefaultNvs> {
         self.nvs.as_mut()
     }

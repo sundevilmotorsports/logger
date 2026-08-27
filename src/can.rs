@@ -307,6 +307,7 @@ impl Can {
 
 /// Init failure or a comm error partway through both land here, so either one
 /// restarts the controller from scratch via `crate::supervisor::run`.
+#[allow(dead_code)]
 #[derive(Debug)]
 enum RunError {
     Init(ConfigError),
@@ -341,6 +342,7 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
     })
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub enum SelfTestError {
     Config(ConfigError),
