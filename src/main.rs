@@ -20,7 +20,9 @@ use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
-use esp_idf_svc::hal::spi::{config::Config as SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig};
+use esp_idf_svc::hal::spi::{
+    config::Config as SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig,
+};
 use esp_idf_svc::hal::uart::{config as uart_config, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
 use gnss::Gnss;
