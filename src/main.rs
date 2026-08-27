@@ -38,15 +38,29 @@ use usb_hs::UsbHsCdc;
 fn main() {
     esp_idf_svc::sys::link_patches();
     esp_idf_svc::log::EspLogger::initialize_default();
-    Configuration::init();
-    info!("Configuration initalized");
 
     let p = Peripherals::take().expect("failed to take peripherals");
     let state = Arc::new(State::default());
     info!("Peripherials");
 
-    // Real SD hardware is dead
-    state.status.sd.store(true, Ordering::Relaxed);
+    let sd_ok = init_sd(
+        p.sdmmc0,
+        p.pins.gpio44, // CMD
+        p.pins.gpio43, // CLK
+        p.pins.gpio39, // D0
+        p.pins.gpio40, // D1
+        p.pins.gpio41, // D2
+        p.pins.gpio42, // D3
+    );
+    state.status.sd.store(sd_ok, Ordering::Relaxed);
+    if sd_ok {
+        info!("SD card initialized");
+    } else {
+        log::error!("SD card init failed");
+    }
+
+    Configuration::init();
+    info!("Configuration initalized");
 
     let spi = init_spi_bus(p.spi2, p.pins.gpio30, p.pins.gpio29, p.pins.gpio31);
     if spi.is_some() {
