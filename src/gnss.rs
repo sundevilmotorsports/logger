@@ -1,3 +1,7 @@
+//! NMEA GNSS receiver on a UART. Parses GGA/RMC sentences into a [`Fix`] and
+//! stores it in `State::sensors::gps`. The status flag means "has a fix", not
+//! "sentences are arriving"; a fix older than `STALE_TIMEOUT` clears it.
+
 use crate::state::State;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay::TickType;

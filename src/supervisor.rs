@@ -1,3 +1,7 @@
+//! Keep-alive wrapper for a sensor thread. [`run`] calls the closure forever,
+//! and if it returns `Err` (device dropped off the bus, I/O error) logs it and
+//! retries after `RETRY_INTERVAL`. One failing sensor never takes down the rest.
+
 use std::time::Duration;
 
 const RETRY_INTERVAL: Duration = Duration::from_secs(3);

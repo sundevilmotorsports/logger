@@ -1,3 +1,8 @@
+//! Thin wrapper over the ESP-IDF TinyUSB CDC-ACM driver: the high-speed USB
+//! serial link to the desktop client ([`crate::serial`] speaks the protocol on
+//! top). Its line-state callback also watches for an espflash reset pulse and
+//! pokes [`crate::bootloader`].
+
 use crate::bootloader;
 use esp_idf_svc::sys::{
     cdcacm_event_t, cdcacm_event_type_t_CDC_EVENT_LINE_STATE_CHANGED, esp, esp_timer_get_time,

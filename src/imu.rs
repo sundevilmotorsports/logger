@@ -1,3 +1,6 @@
+//! LSM6DS-family 6-axis IMU on I2C. Configures accel + gyro, polls an
+//! [`ImuReading`] on a timer, and stores the latest in `State::sensors::imu`.
+
 use crate::state::State;
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::hal::delay::{self, Ets};

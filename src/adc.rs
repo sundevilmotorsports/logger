@@ -1,3 +1,6 @@
+//! External SPI ADC. Polls the configured [`AdcChannel`]s, applies an optional
+//! linear `scale`, and stores the latest values in `State::sensors::adc`.
+
 use crate::configuration::CONFIGURATION;
 use crate::state::State;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};

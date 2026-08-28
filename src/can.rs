@@ -1,6 +1,14 @@
+//! MCP2518FD CAN FD controller over SPI. Interrupt-driven: waits for the INT
+//! pin, drains the RX FIFO, and matches each frame against the configured
+//! [`CanDevice`]s. Supports fixed-signal frames and muxed frames (a
+//! discriminator byte selects a [`SignalGroup`]). Decoded signals land in
+//! `State::sensors::can`.
+
 use crate::configuration::CONFIGURATION;
-use crate::state::State;
+use crate::state::{CanNode, State};
 use embedded_hal::delay::DelayNs;
+use esp_idf_svc::sys::esp_timer_get_time;
+use sdm_utils as sdm;
 use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
@@ -193,10 +201,13 @@ impl Can {
     }
 
     /// Drains the FIFO; unrecognized IDs are discarded so it never backs up.
-    pub fn poll_once(&mut self) -> Result<Vec<(String, Vec<u8>)>, Error> {
+    /// Returns decoded signal updates plus any heartbeats seen as
+    /// `(node id, device type byte)`.
+    pub fn poll_once(&mut self) -> Result<(Vec<(String, Vec<u8>)>, Vec<(u8, u8)>), Error> {
         let devices = CONFIGURATION.lock().can_devices.clone();
 
         let mut updates = Vec::new();
+        let mut heartbeats = Vec::new();
         loop {
             let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? else {
                 break;
@@ -205,11 +216,27 @@ impl Can {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
+            if extended && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8 {
+                let device_type = msg.data().first().copied().unwrap_or(0);
+                heartbeats.push((sdm::can_id_node(raw_id), device_type));
+                continue;
+            }
             collect_updates(&devices, raw_id, extended, msg.data(), &mut updates);
         }
-        Ok(updates)
+        Ok((updates, heartbeats))
+    }
+
+    fn send_heartbeat(&mut self) -> Result<(), Error> {
+        let id = sdm::can_id(sdm::Msg::Heartbeat as u8, sdm::Node::Logger as u8);
+        let payload = [sdm::DeviceType::Logger as u8];
+        let msg = TxMessage::new_2_0(ExtendedId::new(id).unwrap(), &payload).unwrap();
+        self.controller
+            .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
     }
 }
+
+/// Micros between the logger's own heartbeat broadcasts.
+const HEARTBEAT_INTERVAL_US: i64 = 1_000_000;
 
 fn collect_updates(
     devices: &[CanDevice],
@@ -327,15 +354,44 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
         state.status.can.store(true, Ordering::Relaxed);
         log::info!("can initialized");
 
+        let mut last_heartbeat_us = 0i64;
         loop {
             esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge())
                 .map_err(RunError::Pin)?;
 
-            let updates = can.poll_once().map_err(RunError::Comm)?;
+            let (updates, heartbeats) = can.poll_once().map_err(RunError::Comm)?;
             if !updates.is_empty() {
                 let mut latest = state.sensors.can.lock();
                 for (name, bytes) in updates {
                     latest.insert(name, bytes);
+                }
+            }
+            let now = unsafe { esp_timer_get_time() };
+            if !heartbeats.is_empty() {
+                let mut nodes = state.sensors.can_nodes.lock();
+                for (node, device_type) in heartbeats {
+                    nodes.insert(
+                        node,
+                        CanNode {
+                            device_type,
+                            last_seen_us: now,
+                        },
+                    );
+                }
+            }
+            
+            if now - last_heartbeat_us >= HEARTBEAT_INTERVAL_US {
+                last_heartbeat_us = now;
+                if let Err(e) = can.send_heartbeat() {
+                    log::warn!("heartbeat tx failed: {e:?}");
+                } else {
+                    state.sensors.can_nodes.lock().insert(
+                        sdm::Node::Logger as u8,
+                        CanNode {
+                            device_type: sdm::DeviceType::Logger as u8,
+                            last_seen_us: now,
+                        },
+                    );
                 }
             }
         }

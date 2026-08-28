@@ -1,3 +1,7 @@
+//! Per-device health flags. Each flag means "this device is producing good data
+//! right now", not just "it initialized" — GNSS is `true` only with a fix, etc.
+//! [`DeviceStatus::to_json`] serializes them for the status response.
+
 use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Default)]

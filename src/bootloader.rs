@@ -1,3 +1,8 @@
+//! Reboot into the ROM serial bootloader on request. [`usb_hs`](crate::usb_hs)
+//! sets [`REQUESTED`] when it sees an espflash reset pulse on the CDC line; the
+//! watch thread from [`spawn`] then sets the force-download-boot bit and
+//! restarts, so the device can be flashed without a physical BOOT button.
+
 use esp_idf_svc::sys::esp_restart;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;

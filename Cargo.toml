@@ -26,6 +26,7 @@ log = "0.4"
 esp-idf-svc = { version = "0.52.1", features = ["critical-section"] }
 parking_lot = "0.12"
 mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
+sdm-utils = { path = "../../c/sdm-utils/rust" }
 embedded-hal = "1.0.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

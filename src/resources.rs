@@ -1,3 +1,7 @@
+//! Free-heap and per-core CPU-load sampling, reported to the desktop client for
+//! health monitoring. [`ResourceMonitor::sample`] diffs the FreeRTOS idle
+//! counters against the previous call, so load is "since you last asked".
+
 use esp_idf_svc::hal::cpu::CORES;
 use esp_idf_svc::sys::{
     esp_get_free_heap_size, esp_get_minimum_free_heap_size, esp_timer_get_time,

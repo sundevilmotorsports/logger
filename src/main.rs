@@ -1,3 +1,12 @@
+//! ESP32-P4 CAN FD data logger firmware.
+//!
+//! `main` takes the peripherals, brings up each sensor, and hands it to
+//! [`supervisor::run`] on its own thread. A sensor that fails to initialize is
+//! logged and skipped; the rest keep running. Threads write their latest
+//! readings into the shared [`state::State`]; [`logging`] samples that state on
+//! a timer and appends binary rows to the SD card, and [`serial`] serves the
+//! config and log files to the desktop client over USB CDC.
+
 mod adc;
 mod bootloader;
 mod can;

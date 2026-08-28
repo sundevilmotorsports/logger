@@ -1,3 +1,8 @@
+//! Request/response protocol with the desktop client over USB CDC. Decodes
+//! commands (get/set config, list and download logs, start/stop logging,
+//! reboot, status) and replies over the same [`UsbHsCdc`] link. Log downloads
+//! are chunked: the client asks for offsets until it gets back a short read.
+
 use crate::configuration::{Configuration, CONFIGURATION};
 use crate::sd::SdCard;
 use crate::state::State;
@@ -27,6 +32,7 @@ enum Command {
     GetConfig,
     SetConfig { args: Configuration },
     Frames,
+    CanNodes,
     Uptime,
     Gps,
     Imu,
@@ -136,6 +142,24 @@ fn handle_command(payload: &str, state: &State) -> String {
                     .collect()
             };
             ok(serde_json::json!(snapshot))
+        }
+
+        Command::CanNodes => {
+            let now = unsafe { esp_timer_get_time() };
+            let nodes: Vec<_> = state
+                .sensors
+                .can_nodes
+                .lock()
+                .iter()
+                .map(|(node, n)| {
+                    serde_json::json!({
+                        "node": node,
+                        "type": n.device_type,
+                        "age_ms": (now - n.last_seen_us) / 1000,
+                    })
+                })
+                .collect();
+            ok(serde_json::json!(nodes))
         }
 
         Command::Uptime => {

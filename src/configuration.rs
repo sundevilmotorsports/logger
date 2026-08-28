@@ -1,3 +1,7 @@
+//! The logger's runtime config: which CAN devices and ADC channels to decode.
+//! Held in the [`CONFIGURATION`] global, persisted as JSON in NVS, and pushed
+//! from the desktop client over [`serial`](crate::serial).
+
 use crate::adc::AdcChannel;
 use crate::can::CanDevice;
 use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};

@@ -1,3 +1,11 @@
+//! The logging thread. On a timer it snapshots [`State`], builds one fixed-width
+//! row from every configured source (CAN signals, ADC channels, GNSS, IMU), and
+//! appends it to the current SD log file. Each file starts with a self-
+//! describing header so the desktop client can decode it without the config:
+//!
+//! `[1] num_columns`, then per column `[name_len][name][type tag]`
+//! (tag 0 = f32, tag N = N raw bytes). Fixed-width rows follow in that order.
+
 use crate::adc::{AdcChannel, AdcValue};
 use crate::can::{Signal, SignalValue, Signals};
 use crate::configuration::CONFIGURATION;

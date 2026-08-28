@@ -1,3 +1,8 @@
+//! SD card over SDMMC. [`SdCard::init`] mounts a FAT filesystem and opens the
+//! next numbered log file (`0001.bin`, `0002.bin`, …). The rest of the module
+//! is free functions over a process-wide handle: append, sync, roll to a new
+//! file, and read chunks back for the desktop client's log download.
+
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
