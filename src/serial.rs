@@ -5,7 +5,7 @@
 
 use crate::configuration::{Configuration, CONFIGURATION};
 use crate::sd::SdCard;
-use crate::state::State;
+use crate::state::{OtaProgress, OtaRequest, Staged, State};
 use crate::usb_hs::UsbHsCdc;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
@@ -19,6 +19,9 @@ const CHANNEL_CAPACITY: usize = 4;
 
 /// Bytes per `LogChunk` response; the client requests offsets until it gets back fewer.
 const LOG_CHUNK_LEN: usize = 512;
+
+const OTA_STAGE_CAP: usize = 16 * 1024;
+const OTA_STAGE_WAIT_MS: u32 = 5_000;
 
 /// Set by `Command::Reboot`; checked after the ack is sent so the client gets a clean response first.
 static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -43,6 +46,9 @@ enum Command {
     SetLogging { active: bool },
     NextLog,
     Reboot,
+    OtaUpload { offset: u64, data: String },
+    OtaFlash { node: u8, size: u32, crc: u32 },
+    OtaStatus,
 }
 
 /// Spawns the USB reader thread and the command-dispatch thread, linked by a channel pair.
@@ -222,7 +228,73 @@ fn handle_command(payload: &str, state: &State) -> String {
             REBOOT_REQUESTED.store(true, Ordering::Relaxed);
             ok(serde_json::Value::Null)
         }
+
+        Command::OtaUpload { offset, data } => {
+            let bytes = match hex_decode(&data) {
+                Ok(b) => b,
+                Err(e) => return err(e),
+            };
+            // Feed the buffer waiting if the CAN thread hasnt drained enough yet
+            let mut waited_ms = 0u32;
+            loop {
+                if let Some(code) = state.ota.progress.lock().result {
+                    return err(format!("ota aborted (code {code})"));
+                }
+                {
+                    let mut s = state.ota.staged.lock();
+                    if offset != s.end() as u64 {
+                        return err(format!(
+                            "ota_upload out of order: got {offset}, want {}",
+                            s.end()
+                        ));
+                    }
+                    if s.bytes.len() + bytes.len() <= OTA_STAGE_CAP {
+                        s.bytes.extend(bytes.iter().copied());
+                        break;
+                    }
+                }
+                if waited_ms >= OTA_STAGE_WAIT_MS {
+                    return err("ota buffer stalled (CAN side not draining)".into());
+                }
+                std::thread::sleep(Duration::from_millis(5));
+                waited_ms += 5;
+            }
+            let committed = state.ota.progress.lock().sent;
+            ok(serde_json::json!({ "committed": committed }))
+        }
+
+        Command::OtaFlash { node, size, crc } => {
+            *state.ota.staged.lock() = Staged::default();
+            *state.ota.progress.lock() = OtaProgress {
+                active: true,
+                sent: 0,
+                total: size,
+                result: None,
+            };
+            *state.ota.request.lock() = Some(OtaRequest { node, size, crc });
+            ok(serde_json::Value::Null)
+        }
+
+        Command::OtaStatus => {
+            let p = *state.ota.progress.lock();
+            ok(serde_json::json!({
+                "active": p.active,
+                "sent": p.sent,
+                "total": p.total,
+                "result": p.result,
+            }))
+        }
     }
+}
+
+fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
+    if s.len() % 2 != 0 {
+        return Err("odd-length hex".into());
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).map_err(|e| format!("bad hex: {e}")))
+        .collect()
 }
 
 fn reader_thread(

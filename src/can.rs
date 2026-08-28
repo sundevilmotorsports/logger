@@ -5,11 +5,11 @@
 //! `State::sensors::can`.
 
 use crate::configuration::CONFIGURATION;
-use crate::state::{CanNode, State};
+use crate::state::{CanNode, OtaProgress, OtaRequest, State};
 use embedded_hal::delay::DelayNs;
 use esp_idf_svc::sys::esp_timer_get_time;
 use sdm_utils as sdm;
-use esp_idf_svc::hal::delay::FreeRtos;
+use esp_idf_svc::hal::delay::{Ets, FreeRtos};
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use mcp2518fd::memory::controller::fifo::PayloadSize;
@@ -233,10 +233,156 @@ impl Can {
         self.controller
             .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
     }
+
+    /// Streams `req.size` firmware bytes to `req.node` over CAN as the serial
+    /// thread feeds them into `state.ota.staged`
+    fn run_ota(&mut self, state: &State, req: OtaRequest) {
+        *state.ota.progress.lock() = OtaProgress {
+            active: true,
+            sent: 0,
+            total: req.size,
+            result: None,
+        };
+        let finish = |result: u8| {
+            let mut p = state.ota.progress.lock();
+            p.active = false;
+            p.result = Some(result);
+        };
+
+        // START (retry until ACKed)
+        let mut start = [0u8; 8];
+        start[0..4].copy_from_slice(&req.size.to_le_bytes());
+        start[4..8].copy_from_slice(&req.crc.to_le_bytes());
+        let start_id = sdm::can_id(sdm::Msg::OtaStart as u8, req.node);
+        let mut started = false;
+        for _ in 0..OTA_RETRIES {
+            if self.send_ota_frame(start_id, &start).is_err() {
+                continue;
+            }
+            match self.wait_ota_ack(req.node) {
+                Some((_, 0)) => {
+                    started = true;
+                    break;
+                }
+                Some((_, status)) => return finish(status),
+                None => continue,
+            }
+        }
+        if !started {
+            return finish(OTA_STATUS_TIMEOUT);
+        }
+
+        // DATA: ACK sliding window
+        let data_id = sdm::can_id(sdm::Msg::OtaData as u8, req.node);
+        let mut off: u32 = 0;
+        while off < req.size {
+            let window_end = (off + OTA_ACK_WINDOW * OTA_CHUNK as u32).min(req.size);
+
+            // Wait for serial
+            let mut starved_us = 0i64;
+            while state.ota.staged.lock().end() < window_end {
+                Ets.delay_us(OTA_FEED_POLL_US as u32);
+                starved_us += OTA_FEED_POLL_US;
+                if starved_us >= OTA_FEED_TIMEOUT_US {
+                    return finish(OTA_STATUS_STARVED);
+                }
+            }
+
+            let window_start = off;
+            while off < window_end {
+                let n = (window_end - off).min(OTA_CHUNK as u32) as usize;
+                let mut frame = [0u8; 1 + OTA_CHUNK];
+                frame[0] = (off / OTA_CHUNK as u32) as u8;
+                {
+                    let s = state.ota.staged.lock();
+                    let start = (off - s.base) as usize;
+                    for (i, slot) in frame[1..1 + n].iter_mut().enumerate() {
+                        *slot = s.bytes[start + i];
+                    }
+                }
+                if self.send_ota_frame(data_id, &frame[..1 + n]).is_err() {
+                    break; // transient; the nodes next ACK rewinds
+                }
+                off += n as u32;
+                Ets.delay_us(OTA_FRAME_GAP_US);
+            }
+
+            match self.wait_ota_ack(req.node) {
+                Some((acked, 0)) => {
+                    off = acked; // resume where the node actually is
+                    {
+                        let mut s = state.ota.staged.lock();
+                        let advance =
+                            (acked.saturating_sub(s.base) as usize).min(s.bytes.len());
+                        s.bytes.drain(..advance);
+                        s.base += advance as u32;
+                    }
+                    state.ota.progress.lock().sent = acked;
+                }
+                Some((_, status)) => return finish(status),
+                None => off = window_start, // timeout: resend the window
+            }
+        }
+
+        // END (retry until ACKed)
+        let end_id = sdm::can_id(sdm::Msg::OtaEnd as u8, req.node);
+        for _ in 0..OTA_RETRIES {
+            if self.send_ota_frame(end_id, &[]).is_err() {
+                continue;
+            }
+            if let Some((_, status)) = self.wait_ota_ack(req.node) {
+                return finish(status);
+            }
+        }
+        finish(OTA_STATUS_TIMEOUT);
+    }
+
+    fn send_ota_frame(&mut self, id: u32, data: &[u8]) -> Result<(), Error> {
+        let msg = TxMessage::new_2_0(ExtendedId::new(id).unwrap(), data).unwrap();
+        loop {
+            match self
+                .controller
+                .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
+            {
+                Err(Error::FifoFull) => Ets.delay_us(200),
+                other => return other,
+            }
+        }
+    }
+
+    /// Waits for an `OTA_ACK` from `node`
+    fn wait_ota_ack(&mut self, node: u8) -> Option<(u32, u8)> {
+        let ack_id = sdm::can_id(sdm::Msg::OtaAck as u8, node);
+        let deadline = unsafe { esp_timer_get_time() } + OTA_ACK_TIMEOUT_US;
+        while unsafe { esp_timer_get_time() } < deadline {
+            match self.controller.rx_fifo_get_next(FifoNumber::Fifo1) {
+                Ok(Some(msg)) => {
+                    let is_ack = matches!(msg.id(), Id::Extended(id) if id.as_raw() == ack_id);
+                    let d = msg.data();
+                    if is_ack && d.len() >= 5 {
+                        return Some((u32::from_le_bytes([d[0], d[1], d[2], d[3]]), d[4]));
+                    }
+                }
+                Ok(None) => Ets.delay_us(200),
+                Err(_) => return None,
+            }
+        }
+        None
+    }
 }
 
-/// Micros between the logger's own heartbeat broadcasts.
+/// Micros between the loggers own heartbeat broadcasts.
 const HEARTBEAT_INTERVAL_US: i64 = 1_000_000;
+
+const OTA_CHUNK: usize = 7; // byte 0 is seq
+const OTA_ACK_WINDOW: u32 = 16;
+const OTA_FRAME_GAP_US: u32 = 500;
+const OTA_ACK_TIMEOUT_US: i64 = 1_000_000;
+const OTA_RETRIES: u32 = 5;
+const OTA_FEED_POLL_US: i64 = 2_000;
+const OTA_FEED_TIMEOUT_US: i64 = 10_000_000; // serial stopped feeding bytes
+const OTA_STATUS_TIMEOUT: u8 = 0xFE;
+const OTA_STATUS_STARVED: u8 = 0xFD; // serial upload stalled
 
 fn collect_updates(
     devices: &[CanDevice],
@@ -380,6 +526,14 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
                 }
             }
             
+            let ota_req = state.ota.request.lock().take();
+            if let Some(req) = ota_req {
+                log::info!("CAN OTA -> node 0x{:02X} ({} bytes)", req.node, req.size);
+                can.run_ota(&state, req);
+                last_heartbeat_us = unsafe { esp_timer_get_time() };
+                continue;
+            }
+
             if now - last_heartbeat_us >= HEARTBEAT_INTERVAL_US {
                 last_heartbeat_us = now;
                 if let Err(e) = can.send_heartbeat() {
