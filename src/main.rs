@@ -161,6 +161,11 @@ fn main() {
         log::error!("bootloader watch thread failed to start");
     }
 
+    match esp_idf_svc::ota::EspOta::new().and_then(|mut ota| ota.mark_running_slot_valid()) {
+        Ok(()) => info!("running image confirmed valid"),
+        Err(e) => log::warn!("could not mark running image valid: {e}"),
+    }
+
     // Everything runs on its own thread now; park the main thread forever.
     loop {
         std::thread::park();

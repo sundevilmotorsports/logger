@@ -8,7 +8,9 @@ use crate::sd::SdCard;
 use crate::state::{OtaProgress, OtaRequest, Staged, State};
 use crate::usb_hs::UsbHsCdc;
 use esp_idf_svc::hal::delay::{self, FreeRtos};
+use esp_idf_svc::ota::{EspOta, EspOtaUpdate};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
+use sdm_utils as sdm;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
@@ -22,6 +24,12 @@ const LOG_CHUNK_LEN: usize = 512;
 
 const OTA_STAGE_CAP: usize = 16 * 1024;
 const OTA_STAGE_WAIT_MS: u32 = 5_000;
+
+/// `OtaProgress::result` for a self-update that stalled waiting for more bytes
+const OTA_SELF_STARVED: u8 = 0xF4;
+/// Give the client a moment to poll a successful result before we reboot
+const OTA_SELF_REBOOT_DELAY_MS: u64 = 1_500;
+const OTA_SELF_IDLE_TIMEOUT_MS: u32 = 10_000;
 
 /// Set by `Command::Reboot`; checked after the ack is sent so the client gets a clean response first.
 static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -99,7 +107,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     out
 }
 
-fn handle_command(payload: &str, state: &State) -> String {
+fn handle_command(payload: &str, state: &Arc<State>) -> String {
     let ok =
         |data: serde_json::Value| serde_json::json!({"ok": true, "data": data}).to_string() + "\n";
     let err = |msg: String| serde_json::json!({"ok": false, "error": msg}).to_string() + "\n";
@@ -271,7 +279,36 @@ fn handle_command(payload: &str, state: &State) -> String {
                 total: size,
                 result: None,
             };
-            *state.ota.request.lock() = Some(OtaRequest { node, size, crc });
+            if node == sdm::Node::Logger as u8 {
+                // Self-update: open our own OTA slot (the erase inside
+                // `esp_ota_begin` blocks here for a few seconds — the client's
+                // read timeout must allow for it), then drain `staged` into it
+                // on a worker thread as chunks arrive.
+                let ota: &'static mut EspOta = match EspOta::new() {
+                    Ok(o) => Box::leak(Box::new(o)),
+                    Err(e) => {
+                        return err(format!(
+                            "self-update unavailable (no OTA partition table, \
+                             or one was already attempted — reboot to retry): {e}"
+                        ))
+                    }
+                };
+                let update: EspOtaUpdate<'static> =
+                    match ota.initiate_update_with_known_size(size as usize) {
+                        Ok(u) => u,
+                        Err(e) => return err(format!("esp_ota_begin failed: {e}")),
+                    };
+                let state = Arc::clone(state);
+                if std::thread::Builder::new()
+                    .stack_size(8192)
+                    .spawn(move || self_flash(state, update, size, crc))
+                    .is_err()
+                {
+                    return err("could not spawn self-flash thread".into());
+                }
+            } else {
+                *state.ota.request.lock() = Some(OtaRequest { node, size, crc });
+            }
             ok(serde_json::Value::Null)
         }
 
@@ -283,6 +320,84 @@ fn handle_command(payload: &str, state: &State) -> String {
                 "total": p.total,
                 "result": p.result,
             }))
+        }
+    }
+}
+
+struct EspFlash(Option<EspOtaUpdate<'static>>);
+
+impl sdm::ota::Flash for EspFlash {
+    fn begin(&mut self, _size: u32) -> Result<(), sdm::ota::FlashError> {
+        Ok(())
+    }
+    fn write(&mut self, _offset: u32, data: &[u8]) -> Result<(), sdm::ota::FlashError> {
+        self.0
+            .as_mut()
+            .ok_or(sdm::ota::FlashError)?
+            .write(data)
+            .map_err(|_| sdm::ota::FlashError)
+    }
+    fn end(&mut self) -> Result<(), sdm::ota::FlashError> {
+        self.0
+            .take()
+            .ok_or(sdm::ota::FlashError)?
+            .complete()
+            .map_err(|_| sdm::ota::FlashError)
+    }
+}
+
+/// Worker for a logger self-update: drains firmware bytes out of `state.ota.staged`
+fn self_flash(state: Arc<State>, update: EspOtaUpdate<'static>, size: u32, crc: u32) {
+    let fail = |code: u8| {
+        let mut p = state.ota.progress.lock();
+        p.active = false;
+        p.result = Some(code);
+    };
+
+    let mut ota = sdm::ota::Ota::new(EspFlash(Some(update)));
+    if let Err(e) = ota.begin(size, crc) {
+        return fail(e.0 as u8);
+    }
+
+    let mut idle_ms = 0u32;
+    while ota.progress() < size {
+        let chunk: Vec<u8> = {
+            let mut s = state.ota.staged.lock();
+            let v: Vec<u8> = s.bytes.drain(..).collect();
+            s.base += v.len() as u32;
+            v
+        };
+        if chunk.is_empty() {
+            if idle_ms >= OTA_SELF_IDLE_TIMEOUT_MS {
+                return fail(OTA_SELF_STARVED); // drops `ota` -> esp_ota_abort
+            }
+            std::thread::sleep(Duration::from_millis(10));
+            idle_ms += 10;
+            continue;
+        }
+        idle_ms = 0;
+        let off = ota.progress();
+        if let Err(e) = ota.chunk(off, &chunk) {
+            log::error!("self-OTA chunk failed at {off}: {:?}", e);
+            return fail(e.0 as u8);
+        }
+        state.ota.progress.lock().sent = ota.progress();
+    }
+
+    match ota.end() {
+        Ok(()) => {
+            {
+                let mut p = state.ota.progress.lock();
+                p.active = false;
+                p.result = Some(0);
+            }
+            log::info!("self-OTA verified; rebooting into the new image");
+            std::thread::sleep(Duration::from_millis(OTA_SELF_REBOOT_DELAY_MS));
+            unsafe { esp_restart() };
+        }
+        Err(e) => {
+            log::error!("self-OTA verify failed: {:?}", e);
+            fail(e.0 as u8);
         }
     }
 }
