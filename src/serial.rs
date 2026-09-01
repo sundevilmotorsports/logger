@@ -7,6 +7,7 @@ use crate::configuration::{Configuration, CONFIGURATION};
 use crate::sd::SdCard;
 use crate::state::{OtaProgress, OtaRequest, Staged, State};
 use crate::usb_hs::UsbHsCdc;
+use base64::{engine::general_purpose::STANDARD, Engine as _};
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::ota::{EspOta, EspOtaUpdate};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
@@ -19,8 +20,8 @@ use std::time::Duration;
 const MAX_PAYLOAD: usize = 16 * 1024;
 const CHANNEL_CAPACITY: usize = 4;
 
-/// Bytes per `LogChunk` response; the client requests offsets until it gets back fewer.
-const LOG_CHUNK_LEN: usize = 512;
+/// Bytes per `LogChunk` response; the client requests offsets until it gets back fewer
+const LOG_CHUNK_LEN: usize = 8192;
 
 const OTA_STAGE_CAP: usize = 16 * 1024;
 const OTA_STAGE_WAIT_MS: u32 = 5_000;
@@ -96,15 +97,6 @@ fn dispatch_thread(
             unsafe { esp_restart() };
         }
     }
-}
-
-fn hex_encode(bytes: &[u8]) -> String {
-    use std::fmt::Write;
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for b in bytes {
-        let _ = write!(out, "{b:02x}");
-    }
-    out
 }
 
 fn handle_command(payload: &str, state: &Arc<State>) -> String {
@@ -209,9 +201,8 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
 
         Command::LogChunk { name, offset } => {
             match SdCard::read_chunk(&name, offset, LOG_CHUNK_LEN) {
-                // Hex-encoded since the log is binary now, not ASCII.
                 Some(chunk) => ok(serde_json::json!({
-                    "data": hex_encode(&chunk),
+                    "data": STANDARD.encode(&chunk),
                     "eof": chunk.len() < LOG_CHUNK_LEN,
                 })),
                 None => err(format!("no such log: {name}")),
@@ -433,7 +424,7 @@ fn reader_thread(
 
         let n = driver.read(&mut tmp).unwrap_or(0);
         if n == 0 {
-            FreeRtos.delay_ms(10);
+            FreeRtos.delay_ms(2);
         }
         for &b in &tmp[..n] {
             if b == b'\n' {
