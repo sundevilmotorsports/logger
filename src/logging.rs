@@ -1,10 +1,8 @@
 //! The logging thread. On a timer it snapshots [`State`], builds one fixed-width
 //! row from every configured source (CAN signals, ADC channels, GNSS, IMU), and
 //! appends it to the current SD log file. Each file starts with a self-
-//! describing header so the desktop client can decode it without the config:
-//!
-//! `[1] num_columns`, then per column `[name_len][name][type tag]`
-//! (tag 0 = f32, tag N = N raw bytes). Fixed-width rows follow in that order.
+//! describing header ([`sdm_utils::logfmt`]) so the desktop client can decode it
+//! without the config.
 
 use crate::adc::{AdcChannel, AdcValue};
 use crate::can::{Signal, SignalValue, Signals};
@@ -16,22 +14,16 @@ use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::sys::esp_timer_get_time;
+use sdm_utils::logfmt::{ColType, Schema};
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Header: \[1\] num_columns, then per column \[name_len\]\[name\]\[type tag\]
-/// (0 = float, N>0 = N raw bytes). Rows follow, fixed-width, same column order.
-enum ColType {
-    Float,
-    Raw(u8),
-}
-
 fn col_type(scale: Option<f32>, raw_width: u8) -> ColType {
     if scale.is_some() {
-        ColType::Float
+        ColType::F32
     } else {
         ColType::Raw(raw_width)
     }
@@ -98,7 +90,7 @@ impl LogSource for ImuColumns {
             "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp", "mag_x",
             "mag_y", "mag_z",
         ] {
-            push(name, ColType::Float);
+            push(name, ColType::F32);
         }
     }
 
@@ -122,9 +114,9 @@ struct GpsColumns(Option<Fix>);
 
 impl LogSource for GpsColumns {
     fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
-        push("lat", ColType::Float);
-        push("lon", ColType::Float);
-        push("alt", ColType::Float);
+        push("lat", ColType::F32);
+        push("lon", ColType::F32);
+        push("alt", ColType::F32);
         push("sats", ColType::Raw(1));
         push("quality", ColType::Raw(1));
     }
@@ -180,27 +172,16 @@ fn snapshot<'a>(
     ]
 }
 
-fn write_schema(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
-    let mut body = Vec::new();
-    let mut num_cols: u8 = 0;
-    let mut push = |name: &str, ty: ColType| {
-        let tag = match ty {
-            ColType::Float => 0u8,
-            ColType::Raw(n) => n,
-        };
-        body.push(name.len() as u8);
-        body.extend_from_slice(name.as_bytes());
-        body.push(tag);
-        num_cols += 1;
-    };
-
-    push("timestamp", ColType::Raw(8));
-    for src in sources {
-        src.schema(&mut push);
+fn build_schema(sources: &[Box<dyn LogSource + '_>]) -> Schema {
+    let mut schema = Schema::new();
+    schema.push("timestamp", ColType::Raw(8));
+    {
+        let mut push = |name: &str, ty: ColType| schema.push(name, ty);
+        for src in sources {
+            src.schema(&mut push);
+        }
     }
-
-    sink.write_all(&[num_cols])?;
-    sink.write_all(&body)
+    schema
 }
 
 fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
@@ -267,13 +248,9 @@ fn logger_thread(state: Arc<State>) {
             let name = SdCard::current_name().unwrap_or_default();
 
             if name != current_name {
-                let mut buf = Vec::new();
-                if let Err(e) = write_schema(&mut buf, &sources) {
-                    log::error!("failed to build log schema: {e}");
-                } else if let Err(e) = SdCard::write(&buf) {
-                    log::error!("failed to write log schema: {e:?}");
-                } else {
-                    current_name = name;
+                match SdCard::write(&build_schema(&sources).encode_header()) {
+                    Ok(()) => current_name = name,
+                    Err(e) => log::error!("failed to write log schema: {e:?}"),
                 }
             }
 
