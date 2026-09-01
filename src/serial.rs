@@ -139,12 +139,16 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
         },
 
         Command::SetConfig { args } => {
-            let mut guard = CONFIGURATION.lock();
-            guard.can_devices = args.can_devices;
-            guard.adc_channels = args.adc_channels;
-            drop(guard);
+            {
+                let mut guard = CONFIGURATION.lock();
+                guard.can_devices = args.can_devices;
+                guard.adc_channels = args.adc_channels;
+            }
             state.logging.config_changed.store(true, Ordering::Relaxed);
-            ok(serde_json::Value::Null)
+            match Configuration::save() {
+                Ok(()) => ok(serde_json::Value::Null),
+                Err(e) => err(format!("config applied but not saved to SD: {e}")),
+            }
         }
 
         Command::Frames => {

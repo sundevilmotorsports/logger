@@ -1,58 +1,42 @@
 //! The logger's runtime config: which CAN devices and ADC channels to decode.
-//! Held in the [`CONFIGURATION`] global, persisted as JSON in NVS, and pushed
-//! from the desktop client over [`serial`](crate::serial).
+//! Held in the [`CONFIGURATION`] global, read from [`CONFIG_PATH`] on the SD
+//! card at boot, written back there on every update, and pushed from the
+//! desktop client over [`serial`](crate::serial).
 
 use crate::adc::AdcChannel;
 use crate::can::CanDevice;
-use esp_idf_svc::nvs::{EspDefaultNvs, EspDefaultNvsPartition, EspNvs};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::sync::LazyLock;
+
+pub const CONFIG_PATH: &str = "/sdcard/config.json";
 
 #[derive(Serialize, Deserialize)]
 pub struct Configuration {
     pub can_devices: Vec<CanDevice>,
     #[serde(default)]
     pub adc_channels: Vec<AdcChannel>,
-    #[serde(skip)]
-    nvs: Option<EspDefaultNvs>,
 }
 
 pub static CONFIGURATION: LazyLock<Mutex<Configuration>> = LazyLock::new(|| {
     Mutex::new(Configuration {
         can_devices: vec![],
         adc_channels: vec![],
-        nvs: None,
     })
 });
 
 impl Configuration {
-    /// Initialize NVS and load `config.json` from the SD card.
+    /// Load the config from [`CONFIG_PATH`] on the SD card
     pub fn init() {
-        match EspDefaultNvsPartition::take().and_then(|p| EspNvs::new(p, "logger", true)) {
-            Ok(nvs) => CONFIGURATION.lock().nvs = Some(nvs),
-            Err(e) => log::warn!("NVS init failed, continuing without persistent storage: {e}"),
-        }
-
-        match fs::read_to_string("/sdcard/config.json") {
+        match fs::read_to_string(CONFIG_PATH) {
             Ok(json) => {
                 if let Err(e) = Self::load_json(&json) {
-                    log::warn!("Failed to parse config.json: {e}");
+                    log::warn!("Failed to parse {CONFIG_PATH}: {e}");
                 }
             }
-            Err(e) => log::warn!("config.json not found on SD card: {e}"),
+            Err(e) => log::warn!("{CONFIG_PATH} not found on SD card: {e}"),
         }
-    }
-
-    #[allow(dead_code)]
-    pub fn nvs(&self) -> Option<&EspDefaultNvs> {
-        self.nvs.as_ref()
-    }
-
-    #[allow(dead_code)]
-    pub fn nvs_mut(&mut self) -> Option<&mut EspDefaultNvs> {
-        self.nvs.as_mut()
     }
 
     pub fn load_json(json: &str) -> Result<(), serde_json::Error> {
@@ -65,5 +49,10 @@ impl Configuration {
 
     pub fn json() -> Result<String, serde_json::Error> {
         serde_json::to_string(&*CONFIGURATION.lock())
+    }
+
+    pub fn save() -> std::io::Result<()> {
+        let json = Self::json().map_err(std::io::Error::other)?;
+        fs::write(CONFIG_PATH, json)
     }
 }
