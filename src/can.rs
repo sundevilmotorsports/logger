@@ -7,11 +7,10 @@
 use crate::configuration::CONFIGURATION;
 use crate::state::{CanNode, OtaProgress, OtaRequest, State};
 use embedded_hal::delay::DelayNs;
-use esp_idf_svc::sys::esp_timer_get_time;
-use sdm_utils as sdm;
 use esp_idf_svc::hal::delay::{Ets, FreeRtos};
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
+use esp_idf_svc::sys::esp_timer_get_time;
 use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
     id::{ExtendedId, Id, StandardId},
@@ -24,6 +23,7 @@ use mcp2518fd::{
     },
     ConfigError, Error, MCP2518FD,
 };
+use sdm_utils as sdm;
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
@@ -112,11 +112,22 @@ pub enum Signals {
     },
 }
 
+/// Which physical CAN network a device lives on.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Bus {
+    /// The sdm module network: heartbeats, node tracking, and OTA.
+    #[default]
+    Module,
+    Engine,
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct CanDevice {
     pub id: u32,
     pub extended: bool,
     pub fd: bool,
+    #[serde(default)]
+    pub bus: Bus,
     pub signals: Signals,
 }
 
@@ -125,16 +136,19 @@ pub struct CanDevice {
 pub struct Can {
     controller: MCP2518FD<SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>>,
     int_pin: PinDriver<'static, Input>,
+    bus: Bus,
 }
 
 impl Can {
     pub fn new(
         spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
         int_pin: PinDriver<'static, Input>,
+        bus: Bus,
     ) -> Self {
         Self {
             controller: MCP2518FD::new(spi),
             int_pin,
+            bus,
         }
     }
 
@@ -216,12 +230,22 @@ impl Can {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
-            if extended && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8 {
+            if self.bus == Bus::Module
+                && extended
+                && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8
+            {
                 let device_type = msg.data().first().copied().unwrap_or(0);
                 heartbeats.push((sdm::can_id_node(raw_id), device_type));
                 continue;
             }
-            collect_updates(&devices, raw_id, extended, msg.data(), &mut updates);
+            collect_updates(
+                &devices,
+                self.bus,
+                raw_id,
+                extended,
+                msg.data(),
+                &mut updates,
+            );
         }
         Ok((updates, heartbeats))
     }
@@ -312,8 +336,7 @@ impl Can {
                     off = acked; // resume where the node actually is
                     {
                         let mut s = state.ota.staged.lock();
-                        let advance =
-                            (acked.saturating_sub(s.base) as usize).min(s.bytes.len());
+                        let advance = (acked.saturating_sub(s.base) as usize).min(s.bytes.len());
                         s.bytes.drain(..advance);
                         s.base += advance as u32;
                     }
@@ -386,6 +409,7 @@ const OTA_STATUS_STARVED: u8 = 0xFD; // serial upload stalled
 
 fn collect_updates(
     devices: &[CanDevice],
+    bus: Bus,
     raw_id: u32,
     extended: bool,
     data: &[u8],
@@ -393,7 +417,7 @@ fn collect_updates(
 ) {
     let Some(device) = devices
         .iter()
-        .find(|d| d.id == raw_id && d.extended == extended)
+        .find(|d| d.bus == bus && d.id == raw_id && d.extended == extended)
     else {
         return;
     };
@@ -525,27 +549,29 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
                     );
                 }
             }
-            
-            let ota_req = state.ota.request.lock().take();
-            if let Some(req) = ota_req {
-                log::info!("CAN OTA -> node 0x{:02X} ({} bytes)", req.node, req.size);
-                can.run_ota(&state, req);
-                last_heartbeat_us = unsafe { esp_timer_get_time() };
-                continue;
-            }
 
-            if now - last_heartbeat_us >= HEARTBEAT_INTERVAL_US {
-                last_heartbeat_us = now;
-                if let Err(e) = can.send_heartbeat() {
-                    log::warn!("heartbeat tx failed: {e:?}");
-                } else {
-                    state.sensors.can_nodes.lock().insert(
-                        sdm::Node::Logger as u8,
-                        CanNode {
-                            device_type: sdm::DeviceType::Logger as u8,
-                            last_seen_us: now,
-                        },
-                    );
+            if can.bus == Bus::Module {
+                let ota_req = state.ota.request.lock().take();
+                if let Some(req) = ota_req {
+                    log::info!("CAN OTA -> node 0x{:02X} ({} bytes)", req.node, req.size);
+                    can.run_ota(&state, req);
+                    last_heartbeat_us = unsafe { esp_timer_get_time() };
+                    continue;
+                }
+
+                if now - last_heartbeat_us >= HEARTBEAT_INTERVAL_US {
+                    last_heartbeat_us = now;
+                    if let Err(e) = can.send_heartbeat() {
+                        log::warn!("heartbeat tx failed: {e:?}");
+                    } else {
+                        state.sensors.can_nodes.lock().insert(
+                            sdm::Node::Logger as u8,
+                            CanNode {
+                                device_type: sdm::DeviceType::Logger as u8,
+                                last_seen_us: now,
+                            },
+                        );
+                    }
                 }
             }
         }

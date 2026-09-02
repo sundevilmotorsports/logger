@@ -87,18 +87,33 @@ fn main() {
         info!("SPI initalized");
     }
 
-    let can = spi.clone().and_then(|spi| {
+    let can1 = spi.clone().and_then(|spi| {
         let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio34), &SpiConfig::new())
-            .inspect_err(|e| log::error!("CAN SPI device init failed: {e:?}"))
+            .inspect_err(|e| log::error!("CAN1 SPI device init failed: {e:?}"))
             .ok()?;
         let int_pin = PinDriver::input(p.pins.gpio11, Pull::Up)
-            .inspect_err(|e| log::error!("CAN INT pin init failed: {e:?}"))
+            .inspect_err(|e| log::error!("CAN1 INT pin init failed: {e:?}"))
             .ok()?;
-        Some(Can::new(spi_device, int_pin))
+        Some(Can::new(spi_device, int_pin, can::Bus::Module))
     });
-    if let Some(can) = can {
-        if !can.spawn(state.clone()) {
-            log::error!("can thread failed to start");
+    if let Some(can1) = can1 {
+        if !can1.spawn(state.clone()) {
+            log::error!("can1 thread failed to start");
+        }
+    }
+
+    let can2 = spi.clone().and_then(|spi| {
+        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio10), &SpiConfig::new())
+            .inspect_err(|e| log::error!("CAN2 SPI device init failed: {e:?}"))
+            .ok()?;
+        let int_pin = PinDriver::input(p.pins.gpio9, Pull::Up)
+            .inspect_err(|e| log::error!("CAN2 INT pin init failed: {e:?}"))
+            .ok()?;
+        Some(Can::new(spi_device, int_pin, can::Bus::Engine))
+    });
+    if let Some(can2) = can2 {
+        if !can2.spawn(state.clone()) {
+            log::error!("can2 thread failed to start");
         }
     }
 
