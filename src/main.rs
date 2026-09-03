@@ -17,6 +17,7 @@ mod logging;
 mod resources;
 mod sd;
 mod serial;
+mod spi3;
 mod state;
 mod status;
 mod supervisor;
@@ -87,6 +88,20 @@ fn main() {
         info!("SPI initalized");
     }
 
+    let spi3 = SpiDriver::new(
+        spi3::Spi3,
+        p.pins.gpio12,
+        p.pins.gpio13,
+        Some(p.pins.gpio14),
+        &SpiDriverConfig::new(),
+    )
+    .inspect_err(|e| log::error!("engine SPI driver init failed: {e:?}"))
+    .ok()
+    .map(Arc::new);
+    if spi3.is_some() {
+        info!("engine SPI initalized");
+    }
+
     let can1 = spi.clone().and_then(|spi| {
         let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio34), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN1 SPI device init failed: {e:?}"))
@@ -102,7 +117,7 @@ fn main() {
         }
     }
 
-    let can2 = spi.clone().and_then(|spi| {
+    let can2 = spi3.and_then(|spi| {
         let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio10), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN2 SPI device init failed: {e:?}"))
             .ok()?;

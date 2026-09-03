@@ -154,6 +154,12 @@ impl Can {
 
     pub fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), ConfigError> {
         self.controller.reset().map_err(ConfigError::Other)?;
+
+        match self.controller.verify_spi_communications() {
+            Ok(()) => log::info!("{:?} MCP2518FD SPI RAM echo OK", self.bus),
+            Err(e) => log::error!("{:?} MCP2518FD SPI RAM echo failed: {e:?}", self.bus),
+        }
+
         self.controller.configure(
             Settings {
                 oscillator: OscillatorConfiguration::default(),
