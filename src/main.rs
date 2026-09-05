@@ -28,6 +28,7 @@ use can::Can;
 use configuration::Configuration;
 use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
+use esp_idf_svc::hal::ldo::{LdoChannel, LdoChannelConfig, LDO4};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::{
@@ -35,6 +36,7 @@ use esp_idf_svc::hal::spi::{
 };
 use esp_idf_svc::hal::uart::{config as uart_config, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
+use esp_idf_svc::sys::esp_ldo_dump;
 use gnss::Gnss;
 use imu::Imu;
 use log::info;
@@ -42,6 +44,7 @@ use sd::SdCard;
 use state::State;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 use usb_hs::UsbHsCdc;
 
 fn main() {
@@ -51,6 +54,15 @@ fn main() {
     let p = Peripherals::take().expect("failed to take peripherals");
     let state = Arc::new(State::default());
     info!("Peripherials");
+
+    let mut ldo4 = LdoChannel::new(p.ldo4, &LdoChannelConfig::new(3300)).unwrap();
+    ldo4.adjust_voltage(3300).unwrap();
+    unsafe {
+        let out = (*esp_idf_svc::sys::__getreent())._stdout as *mut esp_idf_svc::sys::FILE;
+        esp_ldo_dump(out);
+    }
+
+    std::thread::sleep(Duration::from_millis(250));
 
     let sd_ok = SdCard::init(
         p.sdmmc0,
