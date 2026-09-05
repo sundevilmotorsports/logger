@@ -3,7 +3,7 @@ name: Continuous Integration
 on:
   push:
     branches:
-      - main
+      - master
     paths-ignore:
       - "**/README.md"
   pull_request:
@@ -30,13 +30,27 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+      - name: Install ESP-IDF build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git wget flex bison gperf cmake ninja-build ccache \
+            libffi-dev libssl-dev dfu-util libusb-1.0-0 python3-venv
       - name: Setup Rust
         uses: esp-rs/xtensa-toolchain@v1.6
         with:
           default: true
-          buildtargets: esp32s3
+          buildtargets: esp32p4
           ldproxy: true
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: |
+            .embuild
+          key: esp-idf-${{ runner.os }}-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults', 'components_esp32p4.lock') }}
+          restore-keys: |
+            esp-idf-${{ runner.os }}-
       - name: Run command
         run: cargo ${{ matrix.action.command }} ${{ matrix.action.args }}

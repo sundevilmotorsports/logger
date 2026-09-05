@@ -1,0 +1,173 @@
+name: Release Firmware
+
+# Builds the ESP32-P4 firmware and publishes it under GitHub Releases whenever
+# the `version` in Cargo.toml changes on a push to `master`.
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "Cargo.toml"
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build and release even if the version did not change"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+jobs:
+  check-version:
+    name: Detect version bump
+    runs-on: ubuntu-latest
+    outputs:
+      release: ${{ steps.check.outputs.release }}
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compare Cargo.toml version
+        id: check
+        run: |
+          set -euo pipefail
+          new="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"(.*)"/\1/p' Cargo.toml | head -1)"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "Current version: $new"
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.force }}" = "true" ]; then
+            echo "Forced release requested."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if git rev-parse -q --verify "refs/tags/v$new" >/dev/null; then
+            echo "Tag v$new already exists - nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          before="${{ github.event.before }}"
+          old=""
+          if [ -n "$before" ] && [ "$before" != "0000000000000000000000000000000000000000" ] && git cat-file -e "$before^{commit}" 2>/dev/null; then
+            old="$(git show "$before:Cargo.toml" 2>/dev/null | sed -nE 's/^version[[:space:]]*=[[:space:]]*"(.*)"/\1/p' | head -1)"
+          fi
+          echo "Previous version: ${old:-<unknown>}"
+
+          if [ "$old" = "$new" ]; then
+            echo "Version unchanged - skipping release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Version changed ${old:-<none>} -> $new - releasing."
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  release:
+    name: Build & publish firmware
+    needs: check-version
+    if: needs.check-version.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ESP-IDF build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            git wget flex bison gperf cmake ninja-build ccache \
+            libffi-dev libssl-dev dfu-util libusb-1.0-0 python3-venv
+
+      - name: Setup Rust
+        uses: esp-rs/xtensa-toolchain@v1.6
+        with:
+          default: true
+          buildtargets: esp32p4
+          ldproxy: true
+
+      - name: Enable caching
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cache ESP-IDF
+        uses: actions/cache@v4
+        with:
+          path: |
+            .embuild
+          key: esp-idf-${{ runner.os }}-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults', 'components_esp32p4.lock') }}
+          restore-keys: |
+            esp-idf-${{ runner.os }}-
+
+      - name: Build release firmware
+        run: cargo build --release
+
+      - name: Install espflash
+        uses: taiki-e/install-action@v2
+        with:
+          tool: espflash@4
+
+      - name: Package firmware images
+        id: package
+        run: |
+          set -euo pipefail
+          version="${{ needs.check-version.outputs.version }}"
+          out="dist"
+          mkdir -p "$out"
+
+          elf="target/riscv32imafc-esp-espidf/release/logger"
+          bootloader="target/riscv32imafc-esp-espidf/release/bootloader.bin"
+          parttable="target/riscv32imafc-esp-espidf/release/partition-table.bin"
+
+          cp "$elf" "$out/logger-v$version.elf"
+
+          # Flash size / partition table also come from espflash.toml, but pass
+          # the freshly built bootloader + partition table explicitly so the
+          # image matches this build's sdkconfig.
+
+          # App-only image: write to an OTA slot / use for OTA updates.
+          espflash save-image \
+            --chip esp32p4 \
+            --partition-table "$parttable" \
+            --bootloader "$bootloader" \
+            "$elf" "$out/logger-v$version-app.bin"
+
+          # Full flash image: bootloader + partition table + app, flash at 0x0.
+          espflash save-image \
+            --chip esp32p4 \
+            --merge --skip-padding \
+            --partition-table "$parttable" \
+            --bootloader "$bootloader" \
+            "$elf" "$out/logger-v$version-merged.bin"
+
+          cp "$parttable" "$out/partition-table.bin"
+          cp "$bootloader" "$out/bootloader.bin"
+
+          ( cd "$out" && sha256sum ./* > SHA256SUMS )
+          ls -l "$out"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.check-version.outputs.version }}
+          name: v${{ needs.check-version.outputs.version }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            dist/logger-v${{ needs.check-version.outputs.version }}.elf
+            dist/logger-v${{ needs.check-version.outputs.version }}-app.bin
+            dist/logger-v${{ needs.check-version.outputs.version }}-merged.bin
+            dist/bootloader.bin
+            dist/partition-table.bin
+            dist/SHA256SUMS
