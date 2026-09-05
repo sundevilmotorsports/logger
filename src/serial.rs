@@ -31,6 +31,7 @@ const OTA_SELF_STARVED: u8 = 0xF4;
 /// Give the client a moment to poll a successful result before we reboot
 const OTA_SELF_REBOOT_DELAY_MS: u64 = 1_500;
 const OTA_SELF_IDLE_TIMEOUT_MS: u32 = 10_000;
+const OTA_SELF_BEGIN_TIMEOUT_MS: u64 = 10_000;
 
 /// Set by `Command::Reboot`; checked after the ack is sent so the client gets a clean response first.
 static REBOOT_REQUESTED: AtomicBool = AtomicBool::new(false);
@@ -275,31 +276,19 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
                 result: None,
             };
             if node == sdm::Node::Logger as u8 {
-                // Self-update: open our own OTA slot (the erase inside
-                // `esp_ota_begin` blocks here for a few seconds — the client's
-                // read timeout must allow for it), then drain `staged` into it
-                // on a worker thread as chunks arrive.
-                let ota: &'static mut EspOta = match EspOta::new() {
-                    Ok(o) => Box::leak(Box::new(o)),
-                    Err(e) => {
-                        return err(format!(
-                            "self-update unavailable (no OTA partition table, \
-                             or one was already attempted — reboot to retry): {e}"
-                        ))
-                    }
-                };
-                let update: EspOtaUpdate<'static> =
-                    match ota.initiate_update_with_known_size(size as usize) {
-                        Ok(u) => u,
-                        Err(e) => return err(format!("esp_ota_begin failed: {e}")),
-                    };
+                let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), String>>(1);
                 let state = Arc::clone(state);
                 if std::thread::Builder::new()
                     .stack_size(8192)
-                    .spawn(move || self_flash(state, update, size, crc))
+                    .spawn(move || self_flash(state, size, crc, ready_tx))
                     .is_err()
                 {
                     return err("could not spawn self-flash thread".into());
+                }
+                match ready_rx.recv_timeout(Duration::from_millis(OTA_SELF_BEGIN_TIMEOUT_MS)) {
+                    Ok(Ok(())) => {}
+                    Ok(Err(msg)) => return err(msg),
+                    Err(_) => return err("self-update: esp_ota_begin timed out".into()),
                 }
             } else {
                 *state.ota.request.lock() = Some(OtaRequest { node, size, crc });
@@ -319,9 +308,9 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
     }
 }
 
-struct EspFlash(Option<EspOtaUpdate<'static>>);
+struct EspFlash<'a>(Option<EspOtaUpdate<'a>>);
 
-impl sdm::ota::Flash for EspFlash {
+impl sdm::ota::Flash for EspFlash<'_> {
     fn begin(&mut self, _size: u32) -> Result<(), sdm::ota::FlashError> {
         Ok(())
     }
@@ -341,13 +330,35 @@ impl sdm::ota::Flash for EspFlash {
     }
 }
 
-/// Worker for a logger self-update: drains firmware bytes out of `state.ota.staged`
-fn self_flash(state: Arc<State>, update: EspOtaUpdate<'static>, size: u32, crc: u32) {
+fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Result<(), String>>) {
     let fail = |code: u8| {
         let mut p = state.ota.progress.lock();
         p.active = false;
         p.result = Some(code);
     };
+
+    let mut esp_ota = match EspOta::new() {
+        Ok(o) => o,
+        Err(e) => {
+            ready
+                .send(Err(format!(
+                    "self-update unavailable (no OTA partition table, or a \
+                     previous attempt is still in progress): {e}"
+                )))
+                .ok();
+            return;
+        }
+    };
+    let update = match esp_ota.initiate_update_with_known_size(size as usize) {
+        Ok(u) => u,
+        Err(e) => {
+            ready.send(Err(format!("esp_ota_begin failed: {e}"))).ok();
+            return;
+        }
+    };
+    if ready.send(Ok(())).is_err() {
+        return; // handler stopped waiting
+    }
 
     let mut ota = sdm::ota::Ota::new(EspFlash(Some(update)));
     if let Err(e) = ota.begin(size, crc) {
