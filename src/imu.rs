@@ -42,8 +42,8 @@ const MASTER_CONFIG_RESET: u8 = 0b1000_0000;
 const MASTER_CONFIG_IDLE: u8 = 0b0000_0000;
 /// master_on + shub_pu_en + write_once, triggered by the next accel sample.
 const MASTER_CONFIG_WRITE_ONCE: u8 = 0b0100_1100;
-/// Same as above but write_once cleared -- a standing continuous read.
-const MASTER_CONFIG_CONTINUOUS_READ: u8 = 0b0000_1100;
+
+const MASTER_CONFIG_CONTINUOUS_READ: u8 = MASTER_CONFIG_WRITE_ONCE;
 /// STATUS_MASTER bit7: the one-shot write completed.
 const STATUS_WR_ONCE_DONE: u8 = 0x80;
 
@@ -137,6 +137,8 @@ impl Imu {
         self.reset_sensor_hub()?;
         self.write_magnetometer_config()?;
         self.wait_for_config_write();
+        self.shub_write(REG_MASTER_CONFIG, MASTER_CONFIG_IDLE)?;
+        Ets.delay_us(300);
         self.enable_continuous_magnetometer_read()
     }
 
