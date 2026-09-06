@@ -93,8 +93,8 @@ jobs:
 
       - name: Setup Rust
         run: |
-          rustup toolchain install nightly --profile minimal --component rust-src
-          rustup target add --toolchain nightly riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf
+          rustup toolchain install nightly-2026-06-28 --profile minimal --component rust-src
+          rustup target add --toolchain nightly-2026-06-28 riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf
           cargo install ldproxy
 
       - name: Enable caching
@@ -110,15 +110,7 @@ jobs:
             esp-idf-${{ runner.os }}-
 
       - name: Build release firmware
-        run: |
-          cargo build --release
-          echo "--- immediately after build ---"
-          ls -la target/riscv32imafc-esp-espidf/release/build/esp-idf-sys
-          echo "--- is it a symlink? ---"
-          find target/riscv32imafc-esp-espidf/release/build/esp-idf-sys -maxdepth 4
-          echo "--- readlink build dir itself ---"
-          readlink -f target/riscv32imafc-esp-espidf/release/build || true
-          readlink -f target/riscv32imafc-esp-espidf/release/build/esp-idf-sys || true
+        run: cargo build --release
 
       - name: Install espflash
         uses: taiki-e/install-action@v2
