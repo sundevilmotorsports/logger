@@ -113,16 +113,17 @@ jobs:
         run: |
           cargo build --release
           echo "--- immediately after build ---"
-          find target/riscv32imafc-esp-espidf/release -maxdepth 2
-          find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "*esp-idf-sys*"
+          ls -la target/riscv32imafc-esp-espidf/release/build/esp-idf-sys
+          echo "--- is it a symlink? ---"
+          find target/riscv32imafc-esp-espidf/release/build/esp-idf-sys -maxdepth 4
+          echo "--- readlink build dir itself ---"
+          readlink -f target/riscv32imafc-esp-espidf/release/build || true
+          readlink -f target/riscv32imafc-esp-espidf/release/build/esp-idf-sys || true
 
       - name: Install espflash
         uses: taiki-e/install-action@v2
         with:
           tool: espflash@4
-
-      - name: Debug list build output
-        run: find target/riscv32imafc-esp-espidf/release -maxdepth 2; find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "*esp-idf-sys*"
 
       - name: Package firmware images
         id: package
