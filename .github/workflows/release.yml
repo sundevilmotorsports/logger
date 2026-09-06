@@ -117,6 +117,9 @@ jobs:
         with:
           tool: espflash@4
 
+      - name: Debug list build output
+        run: find target/riscv32imafc-esp-espidf/release -maxdepth 1; find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "esp-idf-sys-*"
+
       - name: Package firmware images
         id: package
         run: |
