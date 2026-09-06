@@ -110,7 +110,11 @@ jobs:
             esp-idf-${{ runner.os }}-
 
       - name: Build release firmware
-        run: cargo build --release
+        run: |
+          cargo build --release
+          echo "--- immediately after build ---"
+          find target/riscv32imafc-esp-espidf/release -maxdepth 2
+          find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "*esp-idf-sys*"
 
       - name: Install espflash
         uses: taiki-e/install-action@v2
@@ -118,7 +122,7 @@ jobs:
           tool: espflash@4
 
       - name: Debug list build output
-        run: find target/riscv32imafc-esp-espidf/release -maxdepth 1; find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "esp-idf-sys-*"
+        run: find target/riscv32imafc-esp-espidf/release -maxdepth 2; find target/riscv32imafc-esp-espidf/release/build -maxdepth 1 -iname "*esp-idf-sys*"
 
       - name: Package firmware images
         id: package
