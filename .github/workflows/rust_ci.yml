@@ -38,7 +38,7 @@ jobs:
             libffi-dev libssl-dev dfu-util libusb-1.0-0 python3-venv
       - name: Setup Rust
         run: |
-          rustup toolchain install nightly-2026-06-28 --profile minimal --component rust-src rustfmt clippy
+          rustup toolchain install nightly-2026-06-28 --profile minimal --component rust-src,rustfmt,clippy
           rustup target add --toolchain nightly-2026-06-28 riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf
           cargo install ldproxy
       - name: Enable caching
