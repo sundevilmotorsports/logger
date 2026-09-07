@@ -117,44 +117,25 @@ jobs:
         with:
           tool: espflash@4
 
-      - name: Package firmware images
-        id: package
+      - name: Package firmware image
         run: |
           set -euo pipefail
           version="${{ needs.check-version.outputs.version }}"
-          out="dist"
-          mkdir -p "$out"
 
           elf="target/riscv32imafc-esp-espidf/release/logger"
           bootloader="target/riscv32imafc-esp-espidf/release/bootloader.bin"
           parttable="target/riscv32imafc-esp-espidf/release/partition-table.bin"
 
-          cp "$elf" "$out/logger-v$version.elf"
-
-          # Flash size / partition table also come from espflash.toml, but pass
-          # the freshly built bootloader + partition table explicitly so the
-          # image matches this build's sdkconfig.
-
-          # App-only image: write to an OTA slot / use for OTA updates.
-          espflash save-image \
-            --chip esp32p4 \
-            --partition-table "$parttable" \
-            --bootloader "$bootloader" \
-            "$elf" "$out/logger-v$version-app.bin"
-
-          # Full flash image: bootloader + partition table + app, flash at 0x0.
+          # Single flashable image: bootloader + partition table + app, write at 0x0.
+          # Uses this build's own bootloader/partition table so it matches sdkconfig.
           espflash save-image \
             --chip esp32p4 \
             --merge --skip-padding \
             --partition-table "$parttable" \
             --bootloader "$bootloader" \
-            "$elf" "$out/logger-v$version-merged.bin"
+            "$elf" "logger-v$version.bin"
 
-          cp "$parttable" "$out/partition-table.bin"
-          cp "$bootloader" "$out/bootloader.bin"
-
-          ( cd "$out" && sha256sum ./* > SHA256SUMS )
-          ls -l "$out"
+          ls -l "logger-v$version.bin"
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
@@ -163,10 +144,4 @@ jobs:
           name: v${{ needs.check-version.outputs.version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: |
-            dist/logger-v${{ needs.check-version.outputs.version }}.elf
-            dist/logger-v${{ needs.check-version.outputs.version }}-app.bin
-            dist/logger-v${{ needs.check-version.outputs.version }}-merged.bin
-            dist/bootloader.bin
-            dist/partition-table.bin
-            dist/SHA256SUMS
+          files: logger-v${{ needs.check-version.outputs.version }}.bin

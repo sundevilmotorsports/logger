@@ -1,6 +1,6 @@
 [package]
 name = "logger"
-version = "0.1.8"
+version = "0.1.9"
 authors = ["Nolan Peterson <ndpete2007@gmail.com>"]
 edition = "2021"
 resolver = "2"
