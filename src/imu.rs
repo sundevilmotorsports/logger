@@ -52,7 +52,7 @@ const MAG_ADDRESS: u8 = 0x1e;
 const MAG_REG_CFG_REG_A: u8 = 0x60;
 const MAG_REG_OUTX_L: u8 = 0x68;
 /// COMP_TEMP_EN=1, ODR=100Hz (0b11), MD=continuous (0b00).
-const MAG_CFG_CONTINUOUS_100HZ: u8 = 0b1_0_0_0_11_00;
+const MAG_CFG_CONTINUOUS_100HZ: u8 = 0b1000_1100;
 /// 1.5 mGauss/LSB, converted to microtesla (1 mGauss = 0.1 uT).
 const MAG_SENSITIVITY_UT: f32 = 0.15;
 

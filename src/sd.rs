@@ -33,6 +33,7 @@ pub struct SdCard {
 }
 
 impl SdCard {
+    #[allow(clippy::too_many_arguments)]
     pub fn init(
         slot: impl SdMmc + 'static,
         cmd: impl OutputPin + 'static,

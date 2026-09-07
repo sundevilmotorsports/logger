@@ -28,7 +28,7 @@ use can::Can;
 use configuration::Configuration;
 use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
-use esp_idf_svc::hal::ldo::{LdoChannel, LdoChannelConfig, LDO4};
+use esp_idf_svc::hal::ldo::{LdoChannel, LdoChannelConfig};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::{

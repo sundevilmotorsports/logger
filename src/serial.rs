@@ -441,10 +441,8 @@ fn reader_thread(
             if b == b'\n' {
                 let payload = String::from_utf8_lossy(&buf).trim().to_string();
                 buf.clear();
-                if !payload.is_empty() {
-                    if cmd_tx.try_send(payload).is_err() {
-                        log::warn!("serial: command channel full, dropping payload");
-                    }
+                if !payload.is_empty() && cmd_tx.try_send(payload).is_err() {
+                    log::warn!("serial: command channel full, dropping payload");
                 }
             } else if buf.len() < MAX_PAYLOAD {
                 buf.push(b);

@@ -131,6 +131,16 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
+/// A decoded signal update: signal name plus its raw bytes.
+pub type SignalUpdate = (String, Vec<u8>);
+
+/// A heartbeat seen on the bus, as `(node id, device type byte)`.
+pub type Heartbeat = (u8, u8);
+
+/// What [`Can::poll_once`] drains from the FIFO: decoded signal updates plus
+/// any heartbeats seen.
+pub type PollResult = (Vec<SignalUpdate>, Vec<Heartbeat>);
+
 /// Concrete over the board's one SPI device (nothing else is plugged in) and
 /// owns `int_pin`, since the driver crate has no idea which GPIO it's wired to.
 pub struct Can {
@@ -223,15 +233,13 @@ impl Can {
     /// Drains the FIFO; unrecognized IDs are discarded so it never backs up.
     /// Returns decoded signal updates plus any heartbeats seen as
     /// `(node id, device type byte)`.
-    pub fn poll_once(&mut self) -> Result<(Vec<(String, Vec<u8>)>, Vec<(u8, u8)>), Error> {
+    pub fn poll_once(&mut self) -> Result<PollResult, Error> {
         let devices = CONFIGURATION.lock().can_devices.clone();
 
         let mut updates = Vec::new();
         let mut heartbeats = Vec::new();
-        loop {
-            let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? else {
-                break;
-            };
+
+        while let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? {
             let (raw_id, extended) = match msg.id() {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
@@ -419,7 +427,7 @@ fn collect_updates(
     raw_id: u32,
     extended: bool,
     data: &[u8],
-    out: &mut Vec<(String, Vec<u8>)>,
+    out: &mut Vec<SignalUpdate>,
 ) {
     let Some(device) = devices
         .iter()
