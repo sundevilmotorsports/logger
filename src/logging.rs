@@ -36,7 +36,7 @@ trait LogSource {
 
 struct CanColumns<'a> {
     signals: &'a [Signal],
-    latest: HashMap<String, Vec<u8>>,
+    latest: &'a HashMap<String, Vec<u8>>,
 }
 
 impl LogSource for CanColumns<'_> {
@@ -60,7 +60,7 @@ impl LogSource for CanColumns<'_> {
 
 struct AdcColumns<'a> {
     channels: &'a [AdcChannel],
-    latest: HashMap<u8, u16>,
+    latest: &'a HashMap<u8, u16>,
 }
 
 impl LogSource for AdcColumns<'_> {
@@ -153,26 +153,26 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().adc_channels.clone()
 }
 
-fn snapshot<'a>(
-    can_signals: &'a [Signal],
-    adc_channels: &'a [AdcChannel],
-    state: &State,
-) -> [Box<dyn LogSource + 'a>; 4] {
-    [
-        Box::new(CanColumns {
-            signals: can_signals,
-            latest: state.sensors.can.lock().clone(),
-        }),
-        Box::new(AdcColumns {
-            channels: adc_channels,
-            latest: state.sensors.adc.lock().clone(),
-        }),
-        Box::new(GpsColumns(state.sensors.gps.lock().clone())),
-        Box::new(ImuColumns(*state.sensors.imu.lock())),
-    ]
+/// Per-tick scratch, kept across ticks so the steady state allocates nothing
+#[derive(Default)]
+struct Scratch {
+    can: HashMap<String, Vec<u8>>,
+    adc: HashMap<u8, u16>,
+    row: Vec<u8>,
 }
 
-fn build_schema(sources: &[Box<dyn LogSource + '_>]) -> Schema {
+impl Scratch {
+    /// Copy the latest sensor readings out from under their locks
+    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<ImuReading>) {
+        self.can.clone_from(&state.sensors.can.lock());
+        self.adc.clone_from(&state.sensors.adc.lock());
+        let gps = state.sensors.gps.lock().clone();
+        let imu = *state.sensors.imu.lock();
+        (gps, imu)
+    }
+}
+
+fn build_schema(sources: &[&dyn LogSource]) -> Schema {
     let mut schema = Schema::new();
     schema.push("timestamp", ColType::Raw(8));
     {
@@ -184,7 +184,7 @@ fn build_schema(sources: &[Box<dyn LogSource + '_>]) -> Schema {
     schema
 }
 
-fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
+fn write_row(mut sink: impl Write, sources: &[&dyn LogSource]) -> io::Result<()> {
     let ts = (unsafe { esp_timer_get_time() } / 1_000) as u64;
     sink.write_all(&ts.to_le_bytes())?;
     for src in sources {
@@ -222,45 +222,84 @@ const LOG_HZ: u32 = 20;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
 fn logger_thread(state: Arc<State>) -> ! {
+    // Carried across supervisor restarts
+    let mut prev_run_wrote = false;
+
     crate::supervisor::run(move || -> Result<(), EspError> {
         let mut can_signals = configured_can_signals();
         let mut adc_channels = configured_adc_channels();
 
-        // Empty so the schema is (re)written on the first tick, after every
-        // `next_log`, and after a supervisor restart.
-        let mut current_name = String::new();
+        if std::mem::take(&mut prev_run_wrote) {
+            SdCard::next_log().ok();
+        }
 
+        // The schema header goes at the top of every file: written on the first
+        // active tick, and again after a `next_log` roll.
+        let mut header_written = false;
+
+        let mut scratch = Scratch::default();
         let mut next_tick = std::time::Instant::now();
+        let mut last_sync = std::time::Instant::now();
 
         loop {
             next_tick += LOG_PERIOD;
+            // A slow SD write can leave next_tick in the past
+            let now = std::time::Instant::now();
+            if now.saturating_duration_since(next_tick) > LOG_PERIOD {
+                next_tick = now;
+            }
 
             if state.logging.config_changed.swap(false, Ordering::Relaxed) {
                 can_signals = configured_can_signals();
                 adc_channels = configured_adc_channels();
-                // Only roll over if a log is actually underway
-                if !current_name.is_empty() {
+                // Only roll if a file is actually underway
+                if header_written {
                     SdCard::next_log().ok();
-                    current_name.clear();
+                    header_written = false;
                 }
             }
 
             if state.logging.active.load(Ordering::Relaxed) {
-                let sources = snapshot(&can_signals, &adc_channels, &state);
-                let name = SdCard::current_name().unwrap_or_default();
+                let (gps, imu) = scratch.refresh(&state);
+                let sources: [&dyn LogSource; 4] = [
+                    &CanColumns {
+                        signals: &can_signals,
+                        latest: &scratch.can,
+                    },
+                    &AdcColumns {
+                        channels: &adc_channels,
+                        latest: &scratch.adc,
+                    },
+                    &GpsColumns(gps),
+                    &ImuColumns(imu),
+                ];
 
-                // A failed SD write means the card is gone or wedged; bail out
-                // and let the supervisor retry rather than spin at LOG_HZ.
-                if name != current_name {
-                    SdCard::write(&build_schema(&sources).encode_header())?;
-                    current_name = name;
+                // A failed SD write means the card is gone or wedged
+                let write = |data: &[u8]| -> Result<(), EspError> {
+                    SdCard::write(data)
+                        .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))
+                };
+
+                if !header_written {
+                    write(&build_schema(&sources).encode_header())?;
+                    header_written = true;
                 }
 
-                let mut buf = Vec::new();
-                if let Err(e) = write_row(&mut buf, &sources) {
+                scratch.row.clear();
+                if let Err(e) = write_row(&mut scratch.row, &sources) {
                     log::warn!("failed to build log row: {e}");
                 } else {
-                    SdCard::write(&buf)?;
+                    write(&scratch.row)?;
+                    prev_run_wrote = true;
+                    state.status.sd.store(true, Ordering::Relaxed);
+                }
+
+                // Flush the write buffer to storage about once a second so a
+                // power loss costs at most that
+                if last_sync.elapsed() >= Duration::from_secs(1) {
+                    SdCard::sync()
+                        .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))?;
+                    last_sync = std::time::Instant::now();
                 }
             }
 

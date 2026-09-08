@@ -387,7 +387,7 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
 
     let mut ota = sdm::ota::Ota::new(EspFlash::new(update));
     if let Err(e) = ota.begin(size, crc) {
-        return fail(e.0 as u8);
+        return fail(e as u8);
     }
 
     let mut idle_ms = 0u32;
@@ -418,7 +418,7 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
         if let Err(e) = ota.chunk(off, &chunk) {
             let cause = ota.flash_mut().last_err;
             log::error!("self-OTA chunk failed at {off}: {e:?} (esp_ota_write: {cause:?})");
-            return fail(e.0 as u8);
+            return fail(e as u8);
         }
         state.ota.progress.lock().sent = ota.progress();
     }
@@ -437,7 +437,7 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
         Err(e) => {
             let cause = ota.flash_mut().last_err;
             log::error!("self-OTA verify failed: {e:?} (esp_ota_end: {cause:?})");
-            fail(e.0 as u8);
+            fail(e as u8);
         }
     }
 }
