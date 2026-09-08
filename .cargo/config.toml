@@ -16,22 +16,16 @@ ESP_IDF_TOOLS_INSTALL_DIR = "workspace"
 # esp-idf-sys's bindgen pass doesn't inherit the -DCFG_TUSB_MCU define that the
 # real CMake build propagates from the esp_tinyusb component, so TinyUSB's
 # tusb_mcu.h can't tell it's building for ESP32-P4 and never sets its FreeRTOS
-# include path, breaking bindgen with "FreeRTOS.h file not found". Supplying
-# it here (bindgen reads this env var directly) fixes that without touching
-# esp-idf-sys itself.
+# include path
 BINDGEN_EXTRA_CLANG_ARGS = "-DCFG_TUSB_MCU=OPT_MCU_ESP32P4"
 
 # Dependencies that compile their own C via cc-rs (e.g. sdm-utils' can_ota.c)
 # don't see the ESP toolchain that esp-idf-sys assembles internally, so cc-rs
-# falls back to host `cc` with `--target=riscv32`, which Apple clang can't
-# target ("No available targets are compatible with triple riscv32"). Point
-# cc-rs at the bundled riscv32 GCC for this target. Paths are workspace-relative
-# so this works on any machine that has run the esp-idf-sys install.
+# falls back to host `cc` with `--target=riscv32
 CC_riscv32imafc_esp_espidf = { value = ".embuild/espressif/tools/riscv32-esp-elf/esp-14.2.0_20251107/riscv32-esp-elf/bin/riscv32-esp-elf-gcc", relative = true }
 AR_riscv32imafc_esp_espidf = { value = ".embuild/espressif/tools/riscv32-esp-elf/esp-14.2.0_20251107/riscv32-esp-elf/bin/riscv32-esp-elf-ar", relative = true }
 # GCC defaults to rv32imac soft-float (ilp32); the ESP32-P4 target uses the
-# single-precision hard-float ABI, so objects must be built ilp32f or the link
-# fails with "can't link soft-float modules with single-float modules".
+# single-precision hard-float ABI
 CFLAGS_riscv32imafc_esp_espidf = "-march=rv32imafc_zicsr_zifencei -mabi=ilp32f"
 
 # Uncomment this if you have moved the target dir by setting CARGO_TARGET_DIR or similar.
