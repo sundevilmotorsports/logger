@@ -222,13 +222,19 @@ const LOG_HZ: u32 = 20;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
 fn logger_thread(state: Arc<State>) -> ! {
+    // Carried across supervisor restarts
+    let mut prev_run_wrote = false;
+
     crate::supervisor::run(move || -> Result<(), EspError> {
         let mut can_signals = configured_can_signals();
         let mut adc_channels = configured_adc_channels();
 
-        // The schema header is (re)written on the first tick, after every
-        // `next_log`, and after a supervisor restart or SD remount
-        let mut current_name = String::new();
+        if std::mem::take(&mut prev_run_wrote) {
+            SdCard::next_log().ok();
+        }
+
+        // The schema header goes at the top of every file: written on the first
+        // active tick, and again after a `next_log` roll.
         let mut header_written = false;
 
         let mut next_tick = std::time::Instant::now();
@@ -240,10 +246,10 @@ fn logger_thread(state: Arc<State>) -> ! {
             if state.logging.config_changed.swap(false, Ordering::Relaxed) {
                 can_signals = configured_can_signals();
                 adc_channels = configured_adc_channels();
-                // Only roll over if a log is actually underway
-                if !current_name.is_empty() {
+                // Only roll if a file is actually underway
+                if header_written {
                     SdCard::next_log().ok();
-                    current_name.clear();
+                    header_written = false;
                 }
             }
 
@@ -256,16 +262,8 @@ fn logger_thread(state: Arc<State>) -> ! {
                         .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))
                 };
 
-                let name = SdCard::current_name().unwrap_or_default();
-                if name != current_name {
-                    current_name = name;
-                    header_written = false;
-                }
-
                 if !header_written {
                     write(&build_schema(&sources).encode_header())?;
-                    // a remount inside write() may have opened a fresh file
-                    current_name = SdCard::current_name().unwrap_or_default();
                     header_written = true;
                 }
 
@@ -274,13 +272,15 @@ fn logger_thread(state: Arc<State>) -> ! {
                     log::warn!("failed to build log row: {e}");
                 } else {
                     write(&buf)?;
+                    prev_run_wrote = true;
                     state.status.sd.store(true, Ordering::Relaxed);
                 }
 
                 // Flush the write buffer to storage about once a second so a
                 // power loss costs at most that
                 if last_sync.elapsed() >= Duration::from_secs(1) {
-                    SdCard::sync().ok();
+                    SdCard::sync()
+                        .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))?;
                     last_sync = std::time::Instant::now();
                 }
             }
