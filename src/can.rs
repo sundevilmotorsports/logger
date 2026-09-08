@@ -313,6 +313,7 @@ impl Can {
         // DATA: ACK sliding window
         let data_id = sdm::can_id(sdm::Msg::OtaData as u8, req.node);
         let mut off: u32 = 0;
+        let mut stalls = 0u32;
         while off < req.size {
             let window_end = (off + OTA_ACK_WINDOW * OTA_CHUNK as u32).min(req.size);
 
@@ -347,6 +348,7 @@ impl Can {
 
             match self.wait_ota_ack(req.node) {
                 Some((acked, 0)) => {
+                    stalls = 0;
                     off = acked; // resume where the node actually is
                     {
                         let mut s = state.ota.staged.lock();
@@ -357,7 +359,14 @@ impl Can {
                     state.ota.progress.lock().sent = acked;
                 }
                 Some((_, status)) => return finish(status),
-                None => off = window_start, // timeout: resend the window
+                None => {
+                    // No ACK
+                    stalls += 1;
+                    if stalls >= OTA_RETRIES {
+                        return finish(OTA_STATUS_TIMEOUT);
+                    }
+                    off = window_start;
+                }
             }
         }
 
@@ -376,7 +385,7 @@ impl Can {
 
     fn send_ota_frame(&mut self, id: u32, data: &[u8]) -> Result<(), Error> {
         let msg = TxMessage::new_2_0(ExtendedId::new(id).unwrap(), data).unwrap();
-        loop {
+        for _ in 0..OTA_TX_FIFO_RETRIES {
             match self
                 .controller
                 .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
@@ -385,6 +394,8 @@ impl Can {
                 other => return other,
             }
         }
+        // FIFO never drained
+        Err(Error::FifoFull)
     }
 
     /// Waits for an `OTA_ACK` from `node`
@@ -416,6 +427,8 @@ const OTA_ACK_WINDOW: u32 = 16;
 const OTA_FRAME_GAP_US: u32 = 500;
 const OTA_ACK_TIMEOUT_US: i64 = 1_000_000;
 const OTA_RETRIES: u32 = 5;
+/// ~10 ms (50 * 200 µs) waiting for a TX FIFO slot before declaring the bus dead
+const OTA_TX_FIFO_RETRIES: u32 = 50;
 const OTA_FEED_POLL_US: i64 = 2_000;
 const OTA_FEED_TIMEOUT_US: i64 = 10_000_000; // serial stopped feeding bytes
 const OTA_STATUS_TIMEOUT: u8 = 0xFE;
