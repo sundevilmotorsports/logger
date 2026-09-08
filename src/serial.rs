@@ -10,7 +10,7 @@ use crate::usb_hs::UsbHsCdc;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use esp_idf_svc::hal::delay::{self, FreeRtos};
 use esp_idf_svc::ota::{EspOta, EspOtaUpdate};
-use esp_idf_svc::sys::{esp_restart, esp_timer_get_time};
+use esp_idf_svc::sys::{esp_restart, esp_timer_get_time, EspError};
 use sdm_utils as sdm;
 use serde::Deserialize;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,6 +28,7 @@ const OTA_STAGE_WAIT_MS: u32 = 5_000;
 
 /// `OtaProgress::result` for a self-update that stalled waiting for more bytes
 const OTA_SELF_STARVED: u8 = 0xF4;
+const OTA_SELF_NOT_APP: u8 = 0xF5;
 /// Give the client a moment to poll a successful result before we reboot
 const OTA_SELF_REBOOT_DELAY_MS: u64 = 1_500;
 const OTA_SELF_IDLE_TIMEOUT_MS: u32 = 10_000;
@@ -308,26 +309,50 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
     }
 }
 
-struct EspFlash<'a>(Option<EspOtaUpdate<'a>>);
+struct EspFlash<'a> {
+    update: Option<EspOtaUpdate<'a>>,
+    last_err: Option<EspError>,
+}
+
+impl<'a> EspFlash<'a> {
+    fn new(update: EspOtaUpdate<'a>) -> Self {
+        Self {
+            update: Some(update),
+            last_err: None,
+        }
+    }
+
+    fn record<T>(&mut self, r: Result<T, EspError>) -> Result<T, sdm::ota::FlashError> {
+        r.map_err(|e| {
+            self.last_err = Some(e);
+            sdm::ota::FlashError
+        })
+    }
+}
 
 impl sdm::ota::Flash for EspFlash<'_> {
     fn begin(&mut self, _size: u32) -> Result<(), sdm::ota::FlashError> {
         Ok(())
     }
     fn write(&mut self, _offset: u32, data: &[u8]) -> Result<(), sdm::ota::FlashError> {
-        self.0
+        let r = self
+            .update
             .as_mut()
             .ok_or(sdm::ota::FlashError)?
-            .write(data)
-            .map_err(|_| sdm::ota::FlashError)
+            .write(data);
+        self.record(r)
     }
     fn end(&mut self) -> Result<(), sdm::ota::FlashError> {
-        self.0
-            .take()
-            .ok_or(sdm::ota::FlashError)?
-            .complete()
-            .map_err(|_| sdm::ota::FlashError)
+        let r = self.update.take().ok_or(sdm::ota::FlashError)?.complete();
+        self.record(r)
     }
+}
+
+/// True if `head` starts with a bare ESP application image
+fn looks_like_app_image(head: &[u8]) -> bool {
+    head.len() >= 0x24
+        && head[0] == 0xE9
+        && u32::from_le_bytes([head[0x20], head[0x21], head[0x22], head[0x23]]) == 0xABCD_5432
 }
 
 fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Result<(), String>>) {
@@ -360,7 +385,7 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
         return; // handler stopped waiting
     }
 
-    let mut ota = sdm::ota::Ota::new(EspFlash(Some(update)));
+    let mut ota = sdm::ota::Ota::new(EspFlash::new(update));
     if let Err(e) = ota.begin(size, crc) {
         return fail(e.0 as u8);
     }
@@ -383,8 +408,16 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
         }
         idle_ms = 0;
         let off = ota.progress();
+        if off == 0 && chunk.len() >= 0x24 && !looks_like_app_image(&chunk) {
+            log::error!(
+                "self-OTA payload is not a bare app image (first bytes {:02X?})",
+                &chunk[..8]
+            );
+            return fail(OTA_SELF_NOT_APP);
+        }
         if let Err(e) = ota.chunk(off, &chunk) {
-            log::error!("self-OTA chunk failed at {off}: {:?}", e);
+            let cause = ota.flash_mut().last_err;
+            log::error!("self-OTA chunk failed at {off}: {e:?} (esp_ota_write: {cause:?})");
             return fail(e.0 as u8);
         }
         state.ota.progress.lock().sent = ota.progress();
@@ -402,7 +435,8 @@ fn self_flash(state: Arc<State>, size: u32, crc: u32, ready: mpsc::SyncSender<Re
             unsafe { esp_restart() };
         }
         Err(e) => {
-            log::error!("self-OTA verify failed: {:?}", e);
+            let cause = ota.flash_mut().last_err;
+            log::error!("self-OTA verify failed: {e:?} (esp_ota_end: {cause:?})");
             fail(e.0 as u8);
         }
     }

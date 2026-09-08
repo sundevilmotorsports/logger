@@ -123,16 +123,9 @@ jobs:
           version="${{ needs.check-version.outputs.version }}"
 
           elf="target/riscv32imafc-esp-espidf/release/logger"
-          bootloader="target/riscv32imafc-esp-espidf/release/bootloader.bin"
-          parttable="target/riscv32imafc-esp-espidf/release/partition-table.bin"
 
-          # Single flashable image: bootloader + partition table + app, write at 0x0.
-          # Uses this build's own bootloader/partition table so it matches sdkconfig.
           espflash save-image \
             --chip esp32p4 \
-            --merge --skip-padding \
-            --partition-table "$parttable" \
-            --bootloader "$bootloader" \
             "$elf" "logger-v$version.bin"
 
           ls -l "logger-v$version.bin"
