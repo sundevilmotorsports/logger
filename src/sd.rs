@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use esp_idf_svc::fs::fatfs::Fatfs;
-use esp_idf_svc::hal::gpio::{InputPin, OutputPin};
-use esp_idf_svc::hal::sd::mmc::{SdMmc, SdMmcHostDriver};
+use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio44};
+use esp_idf_svc::hal::sd::mmc::{SdMmcHostDriver, SDMMC0};
 use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
 use esp_idf_svc::sys::EspError;
@@ -20,7 +20,11 @@ use parking_lot::Mutex;
 const MOUNT_POINT: &str = "/sdcard";
 const LOG_EXT: &str = ".bin";
 
-static SD: OnceLock<Mutex<SdCard>> = OnceLock::new();
+static SD: OnceLock<Mutex<Option<SdCard>>> = OnceLock::new();
+
+fn cell() -> &'static Mutex<Option<SdCard>> {
+    SD.get_or_init(|| Mutex::new(None))
+}
 
 type Vfs = MountedFatfs<Fatfs<SdCardDriver<SdMmcHostDriver<'static>>>>;
 
@@ -33,39 +37,28 @@ pub struct SdCard {
 }
 
 impl SdCard {
-    #[allow(clippy::too_many_arguments)]
-    pub fn init(
-        slot: impl SdMmc + 'static,
-        cmd: impl OutputPin + 'static,
-        clk: impl OutputPin + 'static,
-        d0: impl InputPin + OutputPin + 'static,
-        d1: impl InputPin + OutputPin + 'static,
-        d2: impl InputPin + OutputPin + 'static,
-        d3: impl InputPin + OutputPin + 'static,
-        cd: Option<impl InputPin + 'static>,
-        wp: Option<impl InputPin + 'static>,
-        config: &SdCardConfiguration,
-    ) -> Result<(), EspError> {
+    pub fn init() -> Result<(), EspError> {
+        let mut guard = cell().lock();
+        if guard.is_none() {
+            *guard = Some(Self::open()?);
+        }
+        Ok(())
+    }
+
+    fn open() -> Result<Self, EspError> {
         let host = SdMmcHostDriver::new_4bits(
-            slot,
-            cmd,
-            clk,
-            d0,
-            d1,
-            d2,
-            d3,
-            cd,
-            wp,
+            unsafe { SDMMC0::steal() },
+            unsafe { Gpio44::steal() }, // CMD
+            unsafe { Gpio43::steal() }, // CLK
+            unsafe { Gpio39::steal() }, // D0
+            unsafe { Gpio40::steal() }, // D1
+            unsafe { Gpio41::steal() }, // D2
+            unsafe { Gpio42::steal() }, // D3
+            None::<esp_idf_svc::hal::gpio::AnyIOPin>,
+            None::<esp_idf_svc::hal::gpio::AnyIOPin>,
             &Default::default(),
         )?;
-        let card = Self::build(host, config)?;
-
-        if SD.set(Mutex::new(card)).is_err() {
-            error!("SD card already initialized");
-            return Err(EspError::from_infallible::<-1>());
-        }
-
-        Ok(())
+        Self::build(host, &SdCardConfiguration::new())
     }
 
     fn build(
@@ -95,26 +88,34 @@ impl SdCard {
         })
     }
 
-    fn instance() -> Result<&'static Mutex<SdCard>, EspError> {
-        SD.get().ok_or_else(|| {
-            error!("SD card not initialized");
-            EspError::from_infallible::<-1>()
-        })
+    /// Run `f` against the mounted card, reopening it first if a prior error
+    /// dropped it
+    fn with_card<T>(f: impl FnOnce(&mut SdCard) -> Result<T, EspError>) -> Result<T, EspError> {
+        let mut guard = cell().lock();
+        if guard.is_none() {
+            *guard = Some(Self::open().inspect_err(|e| error!("SD reopen failed: {e:?}"))?);
+        }
+        let r = f(guard.as_mut().unwrap());
+        if let Err(e) = &r {
+            error!("SD op failed ({e:?}); dropping card, will remount on next attempt");
+            *guard = None;
+        }
+        r
     }
 
     /// Append bytes to the current log. Synced to storage on every call.
     pub fn write(data: &[u8]) -> Result<(), EspError> {
-        Self::instance()?.lock().write_buffered(data)
+        Self::with_card(|c| c.write_buffered(data))
     }
 
     /// Flush any buffered data without closing the file.
     pub fn sync() -> Result<(), EspError> {
-        Self::instance()?.lock().sync_buffer()
+        Self::with_card(|c| c.sync_buffer())
     }
 
     /// Flush, close the current log and open the next numbered one.
     pub fn next_log() -> Result<(), EspError> {
-        Self::instance()?.lock().roll()
+        Self::with_card(|c| c.roll())
     }
 
     /// List all `.bin` files on the card.
@@ -129,9 +130,9 @@ impl SdCard {
             .unwrap_or(0)
     }
 
-    /// File name of the current log, or `None` if the card isn't initialized.
+    /// File name of the current log, or `None` if the card isn't mounted.
     pub fn current_name() -> Option<String> {
-        SD.get().map(|sd| sd.lock().name())
+        cell().lock().as_ref().map(|c| c.name())
     }
 
     /// Up to `len` bytes of `name` starting at `offset`. `None` if the file

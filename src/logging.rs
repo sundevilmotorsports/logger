@@ -226,9 +226,10 @@ fn logger_thread(state: Arc<State>) -> ! {
         let mut can_signals = configured_can_signals();
         let mut adc_channels = configured_adc_channels();
 
-        // Empty so the schema is (re)written on the first tick, after every
-        // `next_log`, and after a supervisor restart.
+        // The schema header is (re)written on the first tick, after every
+        // `next_log`, and after a supervisor restart or SD remount
         let mut current_name = String::new();
+        let mut header_written = false;
 
         let mut next_tick = std::time::Instant::now();
 
@@ -247,20 +248,32 @@ fn logger_thread(state: Arc<State>) -> ! {
 
             if state.logging.active.load(Ordering::Relaxed) {
                 let sources = snapshot(&can_signals, &adc_channels, &state);
-                let name = SdCard::current_name().unwrap_or_default();
 
-                // A failed SD write means the card is gone or wedged; bail out
-                // and let the supervisor retry rather than spin at LOG_HZ.
+                // A failed SD write means the card is gone or wedged
+                let write = |data: &[u8]| -> Result<(), EspError> {
+                    SdCard::write(data)
+                        .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))
+                };
+
+                let name = SdCard::current_name().unwrap_or_default();
                 if name != current_name {
-                    SdCard::write(&build_schema(&sources).encode_header())?;
                     current_name = name;
+                    header_written = false;
+                }
+
+                if !header_written {
+                    write(&build_schema(&sources).encode_header())?;
+                    // a remount inside write() may have opened a fresh file
+                    current_name = SdCard::current_name().unwrap_or_default();
+                    header_written = true;
                 }
 
                 let mut buf = Vec::new();
                 if let Err(e) = write_row(&mut buf, &sources) {
                     log::warn!("failed to build log row: {e}");
                 } else {
-                    SdCard::write(&buf)?;
+                    write(&buf)?;
+                    state.status.sd.store(true, Ordering::Relaxed);
                 }
             }
 

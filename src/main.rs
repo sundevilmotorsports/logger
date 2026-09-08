@@ -30,7 +30,6 @@ use esp_idf_svc::hal::gpio::{PinDriver, Pull};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
 use esp_idf_svc::hal::ldo::{LdoChannel, LdoChannelConfig};
 use esp_idf_svc::hal::peripherals::Peripherals;
-use esp_idf_svc::hal::sd::SdCardConfiguration;
 use esp_idf_svc::hal::spi::{
     config::Config as SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig,
 };
@@ -64,20 +63,11 @@ fn main() {
 
     std::thread::sleep(Duration::from_millis(250));
 
-    let sd_ok = SdCard::init(
-        p.sdmmc0,
-        p.pins.gpio44, // CMD
-        p.pins.gpio43, // CLK
-        p.pins.gpio39, // D0
-        p.pins.gpio40, // D1
-        p.pins.gpio41, // D2
-        p.pins.gpio42, // D3
-        None::<esp_idf_svc::hal::gpio::AnyIOPin>,
-        None::<esp_idf_svc::hal::gpio::AnyIOPin>,
-        &SdCardConfiguration::new(),
-    )
-    .inspect_err(|e| log::error!("SD card init failed: {e:?}"))
-    .is_ok();
+    // SD pins are claimed inside `SdCard` via `steal()` so it
+    // can remount itself after a card error
+    let sd_ok = SdCard::init()
+        .inspect_err(|e| log::error!("SD card init failed: {e:?}"))
+        .is_ok();
     state.status.sd.store(sd_ok, Ordering::Relaxed);
     if sd_ok {
         info!("SD card initialized");
