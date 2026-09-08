@@ -36,7 +36,7 @@ trait LogSource {
 
 struct CanColumns<'a> {
     signals: &'a [Signal],
-    latest: HashMap<String, Vec<u8>>,
+    latest: &'a HashMap<String, Vec<u8>>,
 }
 
 impl LogSource for CanColumns<'_> {
@@ -60,7 +60,7 @@ impl LogSource for CanColumns<'_> {
 
 struct AdcColumns<'a> {
     channels: &'a [AdcChannel],
-    latest: HashMap<u8, u16>,
+    latest: &'a HashMap<u8, u16>,
 }
 
 impl LogSource for AdcColumns<'_> {
@@ -153,26 +153,26 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().adc_channels.clone()
 }
 
-fn snapshot<'a>(
-    can_signals: &'a [Signal],
-    adc_channels: &'a [AdcChannel],
-    state: &State,
-) -> [Box<dyn LogSource + 'a>; 4] {
-    [
-        Box::new(CanColumns {
-            signals: can_signals,
-            latest: state.sensors.can.lock().clone(),
-        }),
-        Box::new(AdcColumns {
-            channels: adc_channels,
-            latest: state.sensors.adc.lock().clone(),
-        }),
-        Box::new(GpsColumns(state.sensors.gps.lock().clone())),
-        Box::new(ImuColumns(*state.sensors.imu.lock())),
-    ]
+/// Per-tick scratch, kept across ticks so the steady state allocates nothing
+#[derive(Default)]
+struct Scratch {
+    can: HashMap<String, Vec<u8>>,
+    adc: HashMap<u8, u16>,
+    row: Vec<u8>,
 }
 
-fn build_schema(sources: &[Box<dyn LogSource + '_>]) -> Schema {
+impl Scratch {
+    /// Copy the latest sensor readings out from under their locks
+    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<ImuReading>) {
+        self.can.clone_from(&state.sensors.can.lock());
+        self.adc.clone_from(&state.sensors.adc.lock());
+        let gps = state.sensors.gps.lock().clone();
+        let imu = *state.sensors.imu.lock();
+        (gps, imu)
+    }
+}
+
+fn build_schema(sources: &[&dyn LogSource]) -> Schema {
     let mut schema = Schema::new();
     schema.push("timestamp", ColType::Raw(8));
     {
@@ -184,7 +184,7 @@ fn build_schema(sources: &[Box<dyn LogSource + '_>]) -> Schema {
     schema
 }
 
-fn write_row(mut sink: impl Write, sources: &[Box<dyn LogSource + '_>]) -> io::Result<()> {
+fn write_row(mut sink: impl Write, sources: &[&dyn LogSource]) -> io::Result<()> {
     let ts = (unsafe { esp_timer_get_time() } / 1_000) as u64;
     sink.write_all(&ts.to_le_bytes())?;
     for src in sources {
@@ -237,6 +237,7 @@ fn logger_thread(state: Arc<State>) -> ! {
         // active tick, and again after a `next_log` roll.
         let mut header_written = false;
 
+        let mut scratch = Scratch::default();
         let mut next_tick = std::time::Instant::now();
         let mut last_sync = std::time::Instant::now();
 
@@ -254,7 +255,19 @@ fn logger_thread(state: Arc<State>) -> ! {
             }
 
             if state.logging.active.load(Ordering::Relaxed) {
-                let sources = snapshot(&can_signals, &adc_channels, &state);
+                let (gps, imu) = scratch.refresh(&state);
+                let sources: [&dyn LogSource; 4] = [
+                    &CanColumns {
+                        signals: &can_signals,
+                        latest: &scratch.can,
+                    },
+                    &AdcColumns {
+                        channels: &adc_channels,
+                        latest: &scratch.adc,
+                    },
+                    &GpsColumns(gps),
+                    &ImuColumns(imu),
+                ];
 
                 // A failed SD write means the card is gone or wedged
                 let write = |data: &[u8]| -> Result<(), EspError> {
@@ -267,11 +280,11 @@ fn logger_thread(state: Arc<State>) -> ! {
                     header_written = true;
                 }
 
-                let mut buf = Vec::new();
-                if let Err(e) = write_row(&mut buf, &sources) {
+                scratch.row.clear();
+                if let Err(e) = write_row(&mut scratch.row, &sources) {
                     log::warn!("failed to build log row: {e}");
                 } else {
-                    write(&buf)?;
+                    write(&scratch.row)?;
                     prev_run_wrote = true;
                     state.status.sd.store(true, Ordering::Relaxed);
                 }
