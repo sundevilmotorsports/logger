@@ -456,34 +456,36 @@ fn reader_thread(
     mut driver: UsbHsCdc,
     cmd_tx: mpsc::SyncSender<String>,
     resp_rx: mpsc::Receiver<String>,
-) {
+) -> ! {
     use embedded_hal::delay::DelayNs;
 
-    let mut buf = Vec::<u8>::new();
-    let mut tmp = [0u8; 64];
+    crate::supervisor::run(move || -> Result<(), EspError> {
+        let mut buf = Vec::<u8>::new();
+        let mut tmp = [0u8; 64];
 
-    loop {
-        while let Ok(resp) = resp_rx.try_recv() {
-            let _ = driver.write(resp.as_bytes(), delay::BLOCK);
-        }
+        loop {
+            while let Ok(resp) = resp_rx.try_recv() {
+                let _ = driver.write(resp.as_bytes(), delay::BLOCK);
+            }
 
-        let n = driver.read(&mut tmp).unwrap_or(0);
-        if n == 0 {
-            FreeRtos.delay_ms(2);
-        }
-        for &b in &tmp[..n] {
-            if b == b'\n' {
-                let payload = String::from_utf8_lossy(&buf).trim().to_string();
-                buf.clear();
-                if !payload.is_empty() && cmd_tx.try_send(payload).is_err() {
-                    log::warn!("serial: command channel full, dropping payload");
+            let n = driver.read(&mut tmp)?;
+            if n == 0 {
+                FreeRtos.delay_ms(2);
+            }
+            for &b in &tmp[..n] {
+                if b == b'\n' {
+                    let payload = String::from_utf8_lossy(&buf).trim().to_string();
+                    buf.clear();
+                    if !payload.is_empty() && cmd_tx.try_send(payload).is_err() {
+                        log::warn!("serial: command channel full, dropping payload");
+                    }
+                } else if buf.len() < MAX_PAYLOAD {
+                    buf.push(b);
+                } else {
+                    log::warn!("serial: payload exceeded {MAX_PAYLOAD} bytes, discarding");
+                    buf.clear();
                 }
-            } else if buf.len() < MAX_PAYLOAD {
-                buf.push(b);
-            } else {
-                log::warn!("serial: payload exceeded {MAX_PAYLOAD} bytes, discarding");
-                buf.clear();
             }
         }
-    }
+    })
 }

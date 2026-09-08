@@ -113,32 +113,40 @@ fn control_word(channel: u8, range: Range) -> u16 {
     MANUAL_MODE | WRITE_ENABLE | addr | range_bit
 }
 
-fn poll_loop(mut adc: Adc, state: Arc<State>) {
-    log::info!("adc initialized");
-    loop {
-        let channels: Vec<u8> = CONFIGURATION
-            .lock()
-            .adc_channels
-            .iter()
-            .map(|c| c.channel)
-            .collect();
+fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
+    crate::supervisor::run(move || -> Result<(), AdcError> {
+        state.status.adc.store(false, Ordering::Relaxed);
+        log::info!("adc initialized");
+        loop {
+            let channels: Vec<u8> = CONFIGURATION
+                .lock()
+                .adc_channels
+                .iter()
+                .map(|c| c.channel)
+                .collect();
 
-        let mut latest = HashMap::with_capacity(channels.len());
-        for ch in channels {
-            match adc.read_channel(ch) {
-                Ok(raw) => {
-                    latest.insert(ch, raw);
+            let mut latest = HashMap::with_capacity(channels.len());
+            for ch in channels {
+                match adc.read_channel(ch) {
+                    Ok(raw) => {
+                        latest.insert(ch, raw);
+                    }
+
+                    Err(AdcError::ChannelMismatch { expected, got }) => {
+                        log::warn!("ADC channel {expected} echoed {got}, skipping")
+                    }
+
+                    Err(e @ AdcError::Spi(_)) => return Err(e),
                 }
-                Err(e) => log::warn!("ADC read error on channel {ch}: {e:?}"),
             }
+
+            state
+                .status
+                .adc
+                .store(!latest.is_empty(), Ordering::Relaxed);
+            *state.sensors.adc.lock() = latest;
+
+            std::thread::sleep(Duration::from_millis(50));
         }
-
-        state
-            .status
-            .adc
-            .store(!latest.is_empty(), Ordering::Relaxed);
-        *state.sensors.adc.lock() = latest;
-
-        std::thread::sleep(Duration::from_millis(50));
-    }
+    })
 }

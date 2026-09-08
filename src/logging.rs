@@ -13,7 +13,7 @@ use crate::sd::SdCard;
 use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
-use esp_idf_svc::sys::esp_timer_get_time;
+use esp_idf_svc::sys::{esp_timer_get_time, EspError};
 use sdm_utils::logfmt::{ColType, Schema};
 use std::collections::HashMap;
 use std::io::{self, Write};
@@ -221,47 +221,50 @@ pub fn spawn_logger(state: Arc<State>) -> bool {
 const LOG_HZ: u32 = 20;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
-fn logger_thread(state: Arc<State>) {
-    let mut can_signals = configured_can_signals();
-    let mut adc_channels = configured_adc_channels();
+fn logger_thread(state: Arc<State>) -> ! {
+    crate::supervisor::run(move || -> Result<(), EspError> {
+        let mut can_signals = configured_can_signals();
+        let mut adc_channels = configured_adc_channels();
 
-    // Empty so the schema is (re)written on the first tick and after every `next_log`.
-    let mut current_name = String::new();
+        // Empty so the schema is (re)written on the first tick, after every
+        // `next_log`, and after a supervisor restart.
+        let mut current_name = String::new();
 
-    let mut next_tick = std::time::Instant::now();
+        let mut next_tick = std::time::Instant::now();
 
-    loop {
-        next_tick += LOG_PERIOD;
+        loop {
+            next_tick += LOG_PERIOD;
 
-        if state.logging.config_changed.swap(false, Ordering::Relaxed) {
-            can_signals = configured_can_signals();
-            adc_channels = configured_adc_channels();
-            // Only roll over if a log is actually underway
-            if !current_name.is_empty() {
-                SdCard::next_log().ok();
-                current_name.clear();
-            }
-        }
-
-        if state.logging.active.load(Ordering::Relaxed) {
-            let sources = snapshot(&can_signals, &adc_channels, &state);
-            let name = SdCard::current_name().unwrap_or_default();
-
-            if name != current_name {
-                match SdCard::write(&build_schema(&sources).encode_header()) {
-                    Ok(()) => current_name = name,
-                    Err(e) => log::error!("failed to write log schema: {e:?}"),
+            if state.logging.config_changed.swap(false, Ordering::Relaxed) {
+                can_signals = configured_can_signals();
+                adc_channels = configured_adc_channels();
+                // Only roll over if a log is actually underway
+                if !current_name.is_empty() {
+                    SdCard::next_log().ok();
+                    current_name.clear();
                 }
             }
 
-            let mut buf = Vec::new();
-            if let Err(e) = write_row(&mut buf, &sources) {
-                log::warn!("failed to build log row: {e}");
-            } else if let Err(e) = SdCard::write(&buf) {
-                log::warn!("failed to write log row: {e:?}");
-            }
-        }
+            if state.logging.active.load(Ordering::Relaxed) {
+                let sources = snapshot(&can_signals, &adc_channels, &state);
+                let name = SdCard::current_name().unwrap_or_default();
 
-        std::thread::sleep(next_tick.saturating_duration_since(std::time::Instant::now()));
-    }
+                // A failed SD write means the card is gone or wedged; bail out
+                // and let the supervisor retry rather than spin at LOG_HZ.
+                if name != current_name {
+                    SdCard::write(&build_schema(&sources).encode_header())?;
+                    current_name = name;
+                }
+
+                let mut buf = Vec::new();
+                if let Err(e) = write_row(&mut buf, &sources) {
+                    log::warn!("failed to build log row: {e}");
+                } else {
+                    SdCard::write(&buf)?;
+                }
+            }
+
+            std::thread::sleep(next_tick.saturating_duration_since(std::time::Instant::now()));
+        }
+    })
 }

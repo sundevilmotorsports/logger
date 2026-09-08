@@ -6,6 +6,7 @@ use crate::state::State;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
 use esp_idf_svc::hal::delay::TickType;
 use esp_idf_svc::hal::uart::UartDriver;
+use esp_idf_svc::sys::EspError;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::sync::atomic::Ordering;
@@ -44,39 +45,39 @@ impl Gnss {
     }
 }
 
-fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) {
-    let mut buf = Vec::<u8>::new();
-    let mut tmp = [0u8; 128];
-    let mut last_fix = Instant::now();
-    loop {
-        let n = driver
-            .read(&mut tmp, TickType::from(READ_TIMEOUT).into())
-            .unwrap_or(0);
-        for &b in &tmp[..n] {
-            if b == b'\n' {
-                if let Ok(line) = std::str::from_utf8(&buf) {
-                    let line = line.trim_end_matches('\r');
-                    if let Some(date) = parse_rmc_date(line) {
-                        *LATEST_DATE.lock() = Some(date);
+fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) -> ! {
+    crate::supervisor::run(move || -> Result<(), EspError> {
+        let mut buf = Vec::<u8>::new();
+        let mut tmp = [0u8; 128];
+        let mut last_fix = Instant::now();
+        loop {
+            let n = driver.read(&mut tmp, TickType::from(READ_TIMEOUT).into())?;
+            for &b in &tmp[..n] {
+                if b == b'\n' {
+                    if let Ok(line) = std::str::from_utf8(&buf) {
+                        let line = line.trim_end_matches('\r');
+                        if let Some(date) = parse_rmc_date(line) {
+                            *LATEST_DATE.lock() = Some(date);
+                        }
+                        if let Some(fix) = parse_gga(line) {
+                            *state.sensors.gps.lock() = Some(fix);
+                            last_fix = Instant::now();
+                            state.status.gnss.store(true, Ordering::Relaxed);
+                        }
                     }
-                    if let Some(fix) = parse_gga(line) {
-                        *state.sensors.gps.lock() = Some(fix);
-                        last_fix = Instant::now();
-                        state.status.gnss.store(true, Ordering::Relaxed);
-                    }
+                    buf.clear();
+                } else if buf.len() < 128 {
+                    // NMEA sentences are <= 82 bytes
+                    buf.push(b);
+                } else {
+                    buf.clear();
                 }
-                buf.clear();
-            } else if buf.len() < 128 {
-                // NMEA sentences are <= 82 bytes
-                buf.push(b);
-            } else {
-                buf.clear();
+            }
+            if last_fix.elapsed() > STALE_TIMEOUT {
+                state.status.gnss.store(false, Ordering::Relaxed);
             }
         }
-        if last_fix.elapsed() > STALE_TIMEOUT {
-            state.status.gnss.store(false, Ordering::Relaxed);
-        }
-    }
+    })
 }
 
 fn checksum_body(line: &str) -> Option<&str> {
