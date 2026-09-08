@@ -103,12 +103,13 @@ impl SdCard {
         r
     }
 
-    /// Append bytes to the current log. Synced to storage on every call.
+    /// Append bytes to the current log. Buffered; call [`sync`](Self::sync) to
+    /// force it to storage.
     pub fn write(data: &[u8]) -> Result<(), EspError> {
         Self::with_card(|c| c.write_buffered(data))
     }
 
-    /// Flush any buffered data without closing the file.
+    /// Flush the write buffer and fsync the file without closing it.
     pub fn sync() -> Result<(), EspError> {
         Self::with_card(|c| c.sync_buffer())
     }
@@ -164,37 +165,31 @@ impl SdCard {
             pos += chunk;
 
             if self.write_buf_len == self.write_buf.len() {
-                {
-                    let f = self.current_file.as_mut().unwrap();
-                    Self::write_and_sync(f, &self.write_buf)?;
-                }
+                let f = self.current_file.as_mut().unwrap();
+                Self::write_block(f, &self.write_buf)?;
                 self.write_buf_len = 0;
             }
-        }
-
-        if self.write_buf_len > 0 {
-            let len = self.write_buf_len;
-            {
-                let f = self.current_file.as_mut().unwrap();
-                Self::write_and_sync(f, &self.write_buf[..len])?;
-            }
-            self.write_buf_len = 0;
         }
 
         Ok(())
     }
 
+    /// Push the buffered remainder to the file and fsync everything written
+    /// since the last call.
     fn sync_buffer(&mut self) -> Result<(), EspError> {
+        let f = self
+            .current_file
+            .as_mut()
+            .ok_or(EspError::from_infallible::<-1>())?;
         if self.write_buf_len > 0 {
             let len = self.write_buf_len;
-            let f = self
-                .current_file
-                .as_mut()
-                .ok_or(EspError::from_infallible::<-1>())?;
-            Self::write_and_sync(f, &self.write_buf[..len])?;
+            Self::write_block(f, &self.write_buf[..len])?;
             self.write_buf_len = 0;
         }
-        Ok(())
+        f.sync_all().map_err(|e| {
+            error!("Sync failed: {e}");
+            EspError::from_infallible::<-1>()
+        })
     }
 
     fn roll(&mut self) -> Result<(), EspError> {
@@ -216,13 +211,9 @@ impl SdCard {
         format!("{}{LOG_EXT}", self.log_name)
     }
 
-    fn write_and_sync(file: &mut File, data: &[u8]) -> Result<(), EspError> {
+    fn write_block(file: &mut File, data: &[u8]) -> Result<(), EspError> {
         file.write_all(data).map_err(|e| {
             error!("Write failed: {e}");
-            EspError::from_infallible::<-1>()
-        })?;
-        file.sync_all().map_err(|e| {
-            error!("Sync failed: {e}");
             EspError::from_infallible::<-1>()
         })
     }

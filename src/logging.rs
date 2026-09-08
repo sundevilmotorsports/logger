@@ -232,6 +232,7 @@ fn logger_thread(state: Arc<State>) -> ! {
         let mut header_written = false;
 
         let mut next_tick = std::time::Instant::now();
+        let mut last_sync = std::time::Instant::now();
 
         loop {
             next_tick += LOG_PERIOD;
@@ -274,6 +275,13 @@ fn logger_thread(state: Arc<State>) -> ! {
                 } else {
                     write(&buf)?;
                     state.status.sd.store(true, Ordering::Relaxed);
+                }
+
+                // Flush the write buffer to storage about once a second so a
+                // power loss costs at most that
+                if last_sync.elapsed() >= Duration::from_secs(1) {
+                    SdCard::sync().ok();
+                    last_sync = std::time::Instant::now();
                 }
             }
 
