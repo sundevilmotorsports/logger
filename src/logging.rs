@@ -243,6 +243,11 @@ fn logger_thread(state: Arc<State>) -> ! {
 
         loop {
             next_tick += LOG_PERIOD;
+            // A slow SD write can leave next_tick in the past
+            let now = std::time::Instant::now();
+            if now.saturating_duration_since(next_tick) > LOG_PERIOD {
+                next_tick = now;
+            }
 
             if state.logging.config_changed.swap(false, Ordering::Relaxed) {
                 can_signals = configured_can_signals();
