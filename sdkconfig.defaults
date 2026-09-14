@@ -11,11 +11,6 @@ CONFIG_FREERTOS_IDLE_TASK_STACKSIZE=4096
 # `std::thread::Builder::new().stack_size(XXX)` for spawning
 CONFIG_PTHREAD_TASK_STACK_SIZE_DEFAULT=4096
 
-CONFIG_ESP32P4_SELECTS_REV_LESS_V3=y
-
-CONFIG_TINYUSB_RHPORT_HS=y
-CONFIG_TINYUSB_CDC_ENABLED=y
-
 CONFIG_FREERTOS_HZ=1000
 
 # Needed for ulTaskGetRunTimeCounter
@@ -25,5 +20,17 @@ CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
 # IDF in its own out dir and can't resolve the project-relative partitions.csv,
 # which breaks the build. The custom table is applied at flash time via
 # espflash.toml (partition_table = "partitions.csv") instead.
-CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE_8MB=y
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# SDM26 logger board: ESP32-S3-WROOM-1-N8R8, octal PSRAM at 40 MHz
+# (mirrors the C firmware's sdkconfig for this board).
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_TYPE_AUTO=y
+CONFIG_SPIRAM_SPEED_40M=y
+
+# Long filename support: FATFS defaults to 8.3 short names only, under which
+# "config.json" (a 4-char extension) is an invalid filename and fails to
+# open with EINVAL, at the VFS layer, before ever touching the card.
+CONFIG_FATFS_LFN_HEAP=y

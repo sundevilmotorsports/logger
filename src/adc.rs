@@ -1,21 +1,25 @@
-//! External SPI ADC. Polls the configured [`AdcChannel`]s, applies an optional
-//! linear `scale`, and stores the latest values in `State::sensors::adc`.
+//! TI ADC128S102 SPI ADC: an 8-channel, single-ended, pipelined-conversion
+//! chip (no manual channel-select/echo like the P4 board's ADS7951 had). Each
+//! SPI word both selects the *next* channel to convert and returns the result
+//! of the *previous* one, so all 8 channels are read as one sequential sweep
+//! every cycle, matching `read_all_channels()` in the C firmware's `adc.c`.
+//! Raw 16-bit results are stored unscaled, same as the C firmware.
 
-use crate::configuration::CONFIGURATION;
 use crate::state::State;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::EspError;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
+type AdcSpi = SpiDeviceDriver<'static, SpiDriver<'static>>;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
 pub struct AdcChannel {
     pub name: String,
     pub channel: u8,
-    /// `Some` logs a scaled float; `None` logs the raw 12-bit count, matching a channel with no `processing` fn in the C++ logger.
+    /// `Some` logs a scaled float; `None` logs the raw 16-bit count, matching a channel with no `processing` fn in the C++ logger.
     #[serde(default)]
     pub scale: Option<f32>,
     #[serde(default)]
@@ -36,56 +40,50 @@ impl AdcChannel {
     }
 }
 
-/// 0-2.5V or 0-5V unipolar input range, set once for the whole chip.
-#[allow(dead_code)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Range {
-    R2_5V,
-    R5V,
-}
-
 #[allow(dead_code)]
 #[derive(Debug)]
 pub enum AdcError {
     Spi(EspError),
-    /// The address the chip echoed back didn't match the channel requested.
-    ChannelMismatch {
-        expected: u8,
-        got: u8,
-    },
 }
 
-/// Driver for the TI ADS7951 (12-bit, 8-channel, manual-mode SPI ADC).
+/// Driver for the TI ADC128S102 (8-channel, pipelined SPI ADC).
 /// Concrete over the board's one SPI device -- nothing else is plugged in here.
 pub struct Adc {
-    spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>,
-    range: Range,
+    spi: AdcSpi,
 }
 
 impl Adc {
-    pub fn new(spi: SpiDeviceDriver<'static, Arc<SpiDriver<'static>>>, range: Range) -> Self {
-        Self { spi, range }
+    pub fn new(spi: AdcSpi) -> Self {
+        Self { spi }
     }
 
-    /// Selects `channel` and returns its 12-bit raw conversion result
-    pub fn read_channel(&mut self, channel: u8) -> Result<u16, AdcError> {
-        let mut word = control_word(channel, self.range).to_be_bytes();
-        self.spi
-            .transfer_in_place(&mut word)
-            .map_err(AdcError::Spi)?;
+    /// One full sweep of all 8 channels. Because the chip pipelines by one
+    /// conversion, this issues 9 transfers: select ch0, then for ch=1..=7
+    /// select ch while reading back ch-1's result, then a final transfer
+    /// (select ch0 again) to read back ch7's result.
+    fn read_all_channels(&mut self) -> Result<[u16; 8], AdcError> {
+        let mut results = [0u16; 8];
+
+        let mut word = [0u8, 0u8];
         self.spi
             .transfer_in_place(&mut word)
             .map_err(AdcError::Spi)?;
 
-        let resp = u16::from_be_bytes(word);
-        let got = ((resp >> 12) & 0x0F) as u8;
-        if got != channel {
-            return Err(AdcError::ChannelMismatch {
-                expected: channel,
-                got,
-            });
+        for ch in 1..=7u8 {
+            word = [ch << 3, 0];
+            self.spi
+                .transfer_in_place(&mut word)
+                .map_err(AdcError::Spi)?;
+            results[(ch - 1) as usize] = u16::from_be_bytes(word);
         }
-        Ok(resp & 0x0FFF)
+
+        word = [0, 0];
+        self.spi
+            .transfer_in_place(&mut word)
+            .map_err(AdcError::Spi)?;
+        results[7] = u16::from_be_bytes(word);
+
+        Ok(results)
     }
 
     pub fn spawn(self, state: Arc<State>) -> bool {
@@ -97,53 +95,20 @@ impl Adc {
     }
 }
 
-/// Manual-mode control word: DI15-12 = mode, DI11 = write-enable,
-/// DI10-07 = channel address, DI06 = range, DI05 = powerdown (off),
-/// DI04 = GPIO readback (off), DI03-00 = GPIO data (unused).
-fn control_word(channel: u8, range: Range) -> u16 {
-    const MANUAL_MODE: u16 = 0b0001 << 12;
-    const WRITE_ENABLE: u16 = 1 << 11;
-
-    let addr = (channel as u16 & 0x0F) << 7;
-    let range_bit = match range {
-        Range::R2_5V => 0,
-        Range::R5V => 1 << 6,
-    };
-
-    MANUAL_MODE | WRITE_ENABLE | addr | range_bit
-}
-
 fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
     crate::supervisor::run(move || -> Result<(), AdcError> {
         state.status.adc.store(false, Ordering::Relaxed);
         log::info!("adc initialized");
         loop {
-            let channels: Vec<u8> = CONFIGURATION
-                .lock()
-                .adc_channels
-                .iter()
-                .map(|c| c.channel)
+            let channels = adc.read_all_channels()?;
+
+            let latest: HashMap<u8, u16> = channels
+                .into_iter()
+                .enumerate()
+                .map(|(ch, v)| (ch as u8, v))
                 .collect();
 
-            let mut latest = HashMap::with_capacity(channels.len());
-            for ch in channels {
-                match adc.read_channel(ch) {
-                    Ok(raw) => {
-                        latest.insert(ch, raw);
-                    }
-
-                    Err(AdcError::ChannelMismatch { expected, got }) => {
-                        log::warn!("ADC channel {expected} echoed {got}, skipping")
-                    }
-
-                    Err(e @ AdcError::Spi(_)) => return Err(e),
-                }
-            }
-
-            state
-                .status
-                .adc
-                .store(!latest.is_empty(), Ordering::Relaxed);
+            state.status.adc.store(true, Ordering::Relaxed);
             *state.sensors.adc.lock() = latest;
 
             std::thread::sleep(Duration::from_millis(50));

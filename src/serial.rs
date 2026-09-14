@@ -1,14 +1,15 @@
-//! Request/response protocol with the desktop client over USB CDC. Decodes
-//! commands (get/set config, list and download logs, start/stop logging,
-//! reboot, status) and replies over the same [`UsbHsCdc`] link. Log downloads
-//! are chunked: the client asks for offsets until it gets back a short read.
+//! Request/response protocol with the desktop client over UART0 (wired to a
+//! CP2102N USB-UART bridge on this board). Decodes commands (get/set config,
+//! list and download logs, start/stop logging, reboot, status) and replies
+//! over the same [`UartSerial`] link. Log downloads are chunked: the client
+//! asks for offsets until it gets back a short read.
 
 use crate::configuration::{Configuration, CONFIGURATION};
 use crate::sd::SdCard;
 use crate::state::{OtaProgress, OtaRequest, Staged, State};
-use crate::usb_hs::UsbHsCdc;
+use crate::uart_serial::UartSerial;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use esp_idf_svc::hal::delay::{self, FreeRtos};
+use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::ota::{EspOta, EspOtaUpdate};
 use esp_idf_svc::sys::{esp_restart, esp_timer_get_time, EspError};
 use sdm_utils as sdm;
@@ -49,7 +50,7 @@ enum Command {
     CanNodes,
     Uptime,
     Gps,
-    Imu,
+    Power,
     Resources,
     ListLogs,
     LogChunk { name: String, offset: u64 },
@@ -62,8 +63,8 @@ enum Command {
     OtaStatus,
 }
 
-/// Spawns the USB reader thread and the command-dispatch thread, linked by a channel pair.
-pub fn spawn(driver: UsbHsCdc, state: Arc<State>) -> bool {
+/// Spawns the serial reader thread and the command-dispatch thread, linked by a channel pair.
+pub fn spawn(driver: UartSerial, state: Arc<State>) -> bool {
     let (cmd_tx, cmd_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);
     let (resp_tx, resp_rx) = mpsc::sync_channel::<String>(CHANNEL_CAPACITY);
 
@@ -95,7 +96,7 @@ fn dispatch_thread(
         }
 
         if REBOOT_REQUESTED.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_millis(200)); // give the ack time to actually flush over USB
+            std::thread::sleep(Duration::from_millis(200)); // give the ack time to actually flush over serial
             unsafe { esp_restart() };
         }
     }
@@ -184,9 +185,9 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
             None => err("no fix".into()),
         },
 
-        Command::Imu => match &*state.sensors.imu.lock() {
-            Some(imu) => ok(serde_json::to_value(imu).unwrap_or_default()),
-            None => err("no imu".into()),
+        Command::Power => match &*state.sensors.power.lock() {
+            Some(power) => ok(serde_json::to_value(power).unwrap_or_default()),
+            None => err("no power reading".into()),
         },
 
         Command::Resources => {
@@ -453,7 +454,7 @@ fn hex_decode(s: &str) -> Result<Vec<u8>, String> {
 }
 
 fn reader_thread(
-    mut driver: UsbHsCdc,
+    mut driver: UartSerial,
     cmd_tx: mpsc::SyncSender<String>,
     resp_rx: mpsc::Receiver<String>,
 ) -> ! {
@@ -465,7 +466,7 @@ fn reader_thread(
 
         loop {
             while let Ok(resp) = resp_rx.try_recv() {
-                let _ = driver.write(resp.as_bytes(), delay::BLOCK);
+                let _ = driver.write(resp.as_bytes());
             }
 
             let n = driver.read(&mut tmp)?;

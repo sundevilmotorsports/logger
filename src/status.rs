@@ -9,10 +9,10 @@ pub struct DeviceStatus {
     pub adc: AtomicBool,
     pub can: AtomicBool,
     pub gnss: AtomicBool,
-    pub imu: AtomicBool,
+    pub power: AtomicBool,
     pub logging: AtomicBool,
     pub sd: AtomicBool,
-    pub usb_hs: AtomicBool,
+    pub serial: AtomicBool,
 }
 
 impl DeviceStatus {
@@ -22,10 +22,10 @@ impl DeviceStatus {
             "adc": load(&self.adc),
             "can": load(&self.can),
             "gnss": load(&self.gnss),
-            "imu": load(&self.imu),
+            "power": load(&self.power),
             "logging": load(&self.logging),
             "sd": load(&self.sd),
-            "usb_hs": load(&self.usb_hs),
+            "serial": load(&self.serial),
         })
     }
 }

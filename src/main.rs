@@ -1,50 +1,50 @@
-//! ESP32-P4 CAN FD data logger firmware.
+//! SDM26 ESP32-S3 data logger firmware.
 //!
 //! `main` takes the peripherals, brings up each sensor, and hands it to
 //! [`supervisor::run`] on its own thread. A sensor that fails to initialize is
 //! logged and skipped; the rest keep running. Threads write their latest
 //! readings into the shared [`state::State`]; [`logging`] samples that state on
 //! a timer and appends binary rows to the SD card, and [`serial`] serves the
-//! config and log files to the desktop client over USB CDC.
+//! config and log files to the desktop client over UART0 (a CP2102N
+//! USB-UART bridge on this board -- see `uart_serial`).
 
 mod adc;
-mod bootloader;
 mod can;
 mod configuration;
 mod gnss;
-mod imu;
+mod ina260;
 mod logging;
 mod resources;
 mod sd;
 mod serial;
-mod spi3;
 mod state;
 mod status;
 mod supervisor;
-mod usb_hs;
+mod uart_serial;
 
 use adc::Adc;
 use can::Can;
 use configuration::Configuration;
-use esp_idf_svc::hal::gpio::{PinDriver, Pull};
+use esp_idf_svc::hal::can::{
+    config::{Config as CanConfig, Filter as CanFilter, Mode as CanMode, Timing as CanTiming},
+    CanDriver,
+};
 use esp_idf_svc::hal::i2c::{config::Config as I2cConfig, I2cDriver};
-use esp_idf_svc::hal::ldo::{LdoChannel, LdoChannelConfig};
 use esp_idf_svc::hal::peripherals::Peripherals;
 use esp_idf_svc::hal::spi::{
-    config::Config as SpiConfig, SpiDeviceDriver, SpiDriver, SpiDriverConfig,
+    config::{Config as SpiConfig, MODE_3},
+    SpiDeviceDriver, SpiDriver, SpiDriverConfig,
 };
 use esp_idf_svc::hal::uart::{config as uart_config, UartDriver};
 use esp_idf_svc::hal::units::Hertz;
-use esp_idf_svc::sys::esp_ldo_dump;
 use gnss::Gnss;
-use imu::Imu;
+use ina260::Ina260;
 use log::info;
 use sd::SdCard;
 use state::State;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
-use usb_hs::UsbHsCdc;
+use uart_serial::UartSerial;
 
 fn main() {
     esp_idf_svc::sys::link_patches();
@@ -53,15 +53,6 @@ fn main() {
     let p = Peripherals::take().expect("failed to take peripherals");
     let state = Arc::new(State::default());
     info!("Peripherials");
-
-    let mut ldo4 = LdoChannel::new(p.ldo4, &LdoChannelConfig::new(3300)).unwrap();
-    ldo4.adjust_voltage(3300).unwrap();
-    unsafe {
-        let out = (*esp_idf_svc::sys::__getreent())._stdout as *mut esp_idf_svc::sys::FILE;
-        esp_ldo_dump(out);
-    }
-
-    std::thread::sleep(Duration::from_millis(250));
 
     // SD pins are claimed inside `SdCard` via `steal()` so it
     // can remount itself after a card error
@@ -76,69 +67,28 @@ fn main() {
     Configuration::init();
     info!("Configuration initalized");
 
-    let spi = SpiDriver::new(
-        p.spi2,
-        p.pins.gpio30,
-        p.pins.gpio29,
-        Some(p.pins.gpio31),
-        &SpiDriverConfig::new(),
-    )
-    .inspect_err(|e| log::error!("SPI driver init failed: {e:?}"))
-    .ok()
-    .map(Arc::new);
-    if spi.is_some() {
-        info!("SPI initalized");
-    }
-
+    // ADC128S102 on SPI3 (VSPI): CS=GPIO4, CLK=GPIO5, DOUT(MISO)=GPIO6, DIN(MOSI)=GPIO7.
     let spi3 = SpiDriver::new(
-        spi3::Spi3,
-        p.pins.gpio12,
-        p.pins.gpio13,
-        Some(p.pins.gpio14),
+        p.spi3,
+        p.pins.gpio5,       // sclk
+        p.pins.gpio7,       // sdo (MOSI -> ADC DIN)
+        Some(p.pins.gpio6), // sdi (MISO <- ADC DOUT)
         &SpiDriverConfig::new(),
     )
-    .inspect_err(|e| log::error!("engine SPI driver init failed: {e:?}"))
-    .ok()
-    .map(Arc::new);
-    if spi3.is_some() {
-        info!("engine SPI initalized");
-    }
+    .inspect_err(|e| log::error!("ADC SPI driver init failed: {e:?}"))
+    .ok();
 
-    let can1 = spi.clone().and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio34), &SpiConfig::new())
-            .inspect_err(|e| log::error!("CAN1 SPI device init failed: {e:?}"))
-            .ok()?;
-        let int_pin = PinDriver::input(p.pins.gpio11, Pull::Up)
-            .inspect_err(|e| log::error!("CAN1 INT pin init failed: {e:?}"))
-            .ok()?;
-        Some(Can::new(spi_device, int_pin, can::Bus::Module))
-    });
-    if let Some(can1) = can1 {
-        if !can1.spawn(state.clone()) {
-            log::error!("can1 thread failed to start");
-        }
-    }
-
-    let can2 = spi3.and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio10), &SpiConfig::new())
-            .inspect_err(|e| log::error!("CAN2 SPI device init failed: {e:?}"))
-            .ok()?;
-        let int_pin = PinDriver::input(p.pins.gpio9, Pull::Up)
-            .inspect_err(|e| log::error!("CAN2 INT pin init failed: {e:?}"))
-            .ok()?;
-        Some(Can::new(spi_device, int_pin, can::Bus::Engine))
-    });
-    if let Some(can2) = can2 {
-        if !can2.spawn(state.clone()) {
-            log::error!("can2 thread failed to start");
-        }
-    }
-
-    let adc = spi.and_then(|spi| {
-        SpiDeviceDriver::new(spi, Some(p.pins.gpio27), &SpiConfig::new())
-            .inspect_err(|e| log::error!("ADC SPI device init failed: {e:?}"))
-            .ok()
-            .map(|spi_device| Adc::new(spi_device, adc::Range::R5V))
+    let adc = spi3.and_then(|spi| {
+        SpiDeviceDriver::new(
+            spi,
+            Some(p.pins.gpio4),
+            &SpiConfig::new()
+                .baudrate(Hertz(10_000_000))
+                .data_mode(MODE_3),
+        )
+        .inspect_err(|e| log::error!("ADC SPI device init failed: {e:?}"))
+        .ok()
+        .map(Adc::new)
     });
     if let Some(adc) = adc {
         if !adc.spawn(state.clone()) {
@@ -146,20 +96,40 @@ fn main() {
         }
     }
 
-    let imu = I2cDriver::new(p.i2c0, p.pins.gpio2, p.pins.gpio3, &I2cConfig::new())
-        .inspect_err(|e| log::error!("I2C driver init failed: {e:?}"))
+    let can_config = CanConfig::new()
+        .timing(CanTiming::B1M)
+        .filter(CanFilter::extended_allow_all())
+        .mode(CanMode::Normal)
+        .rx_queue_len(256);
+    let can = CanDriver::new(p.can, p.pins.gpio8, p.pins.gpio18, &can_config)
+        .inspect_err(|e| log::error!("CAN driver init failed: {e:?}"))
         .ok()
-        .map(Imu::new);
-    if let Some(imu) = imu {
-        if !imu.spawn(state.clone()) {
-            log::error!("imu thread failed to start");
+        .map(Can::new);
+    if let Some(can) = can {
+        if !can.spawn(state.clone()) {
+            log::error!("can thread failed to start");
         }
     }
 
+    let i2c_config = I2cConfig::new()
+        .baudrate(Hertz(100_000))
+        .sda_enable_pullup(false)
+        .scl_enable_pullup(false);
+    let power = I2cDriver::new(p.i2c0, p.pins.gpio48, p.pins.gpio47, &i2c_config)
+        .inspect_err(|e| log::error!("I2C driver init failed: {e:?}"))
+        .ok()
+        .map(Ina260::new);
+    if let Some(power) = power {
+        if !power.spawn(state.clone()) {
+            log::error!("ina260 thread failed to start");
+        }
+    }
+
+    // NEO-F9P GNSS on UART1: TX/RX = GPIO19/20, 38400 baud.
     let gnss = UartDriver::new(
         p.uart1,
-        p.pins.gpio33,
-        p.pins.gpio32,
+        p.pins.gpio19,
+        p.pins.gpio20,
         Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
         Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
         &uart_config::Config::new().baudrate(Hertz(38_400)),
@@ -174,23 +144,27 @@ fn main() {
         }
     }
 
-    let usb_hs = UsbHsCdc::new()
-        .inspect_err(|e| log::error!("USB HS CDC init failed: {e:?}"))
-        .ok();
-    if let Some(usb_hs) = usb_hs {
-        if serial::spawn(usb_hs, state.clone()) {
-            state.status.usb_hs.store(true, Ordering::Relaxed);
-            info!("usb hs initialized, serial communication initialized");
+    let serial_link = UartDriver::new(
+        p.uart0,
+        p.pins.gpio43,
+        p.pins.gpio44,
+        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
+        Option::<esp_idf_svc::hal::gpio::AnyIOPin>::None,
+        &uart_config::Config::new().baudrate(Hertz(115_200)),
+    )
+    .inspect_err(|e| log::error!("serial UART init failed: {e:?}"))
+    .ok()
+    .map(UartSerial::new);
+    if let Some(serial_link) = serial_link {
+        if serial::spawn(serial_link, state.clone()) {
+            state.status.serial.store(true, Ordering::Relaxed);
+            info!("serial link initialized");
         }
     }
 
     if logging::spawn_logger(state.clone()) {
         state.status.logging.store(true, Ordering::Relaxed);
         info!("logging initialized");
-    }
-
-    if !bootloader::spawn() {
-        log::error!("bootloader watch thread failed to start");
     }
 
     match esp_idf_svc::ota::EspOta::new().and_then(|mut ota| ota.mark_running_slot_valid()) {

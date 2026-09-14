@@ -3,7 +3,7 @@
 //! health flags, the resource monitor, and the logging on/off control.
 
 use crate::gnss::Fix;
-use crate::imu::ImuReading;
+use crate::ina260::PowerReading;
 use crate::resources::ResourceMonitor;
 use crate::status::DeviceStatus;
 use parking_lot::Mutex;
@@ -63,7 +63,7 @@ pub struct Sensors {
     pub can_nodes: Mutex<HashMap<u8, CanNode>>,
     pub adc: Mutex<HashMap<u8, u16>>,
     pub gps: Mutex<Option<Fix>>,
-    pub imu: Mutex<Option<ImuReading>>,
+    pub power: Mutex<Option<PowerReading>>,
 }
 
 #[derive(Clone, Copy)]

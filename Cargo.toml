@@ -26,7 +26,6 @@ base64 = "0.22"
 log = "0.4"
 esp-idf-svc = { version = "0.52.1", features = ["critical-section"] }
 parking_lot = "0.12"
-mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
 sdm-utils = { git = "https://github.com/sundevilmotorsports/sdm-utils.git", features = ["alloc"] }
 embedded-hal = "1.0.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -35,6 +34,3 @@ chrono = { version = "0.4.45", features = ["serde"] }
 
 [build-dependencies]
 embuild = "0.33"
-
-[[package.metadata.esp-idf-sys.extra_components]]
-remote_component = { name = "espressif/esp_tinyusb", version = "1.7.6~1" }

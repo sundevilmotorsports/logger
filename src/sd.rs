@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use esp_idf_svc::fs::fatfs::Fatfs;
-use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio44};
+use esp_idf_svc::hal::gpio::{Gpio10, Gpio11, Gpio12};
 use esp_idf_svc::hal::sd::mmc::{SdMmcHostDriver, SDMMC0};
 use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
@@ -46,14 +46,14 @@ impl SdCard {
     }
 
     fn open() -> Result<Self, EspError> {
-        let host = SdMmcHostDriver::new_4bits(
+        // 1-bit SDMMC, matching the C firmware's sdcard.c: the schematic
+        // brings out all 4 data lines, but only D0/CLK/CMD are wired to the
+        // firmware's SDMMC host (D1-D3 are present on the card edge but unused).
+        let host = SdMmcHostDriver::new_1bit(
             unsafe { SDMMC0::steal() },
-            unsafe { Gpio44::steal() }, // CMD
-            unsafe { Gpio43::steal() }, // CLK
-            unsafe { Gpio39::steal() }, // D0
-            unsafe { Gpio40::steal() }, // D1
-            unsafe { Gpio41::steal() }, // D2
-            unsafe { Gpio42::steal() }, // D3
+            unsafe { Gpio12::steal() }, // CMD
+            unsafe { Gpio11::steal() }, // CLK
+            unsafe { Gpio10::steal() }, // D0
             None::<esp_idf_svc::hal::gpio::AnyIOPin>,
             None::<esp_idf_svc::hal::gpio::AnyIOPin>,
             &Default::default(),
@@ -101,6 +101,11 @@ impl SdCard {
             *guard = None;
         }
         r
+    }
+
+    pub fn with_lock<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = cell().lock();
+        f()
     }
 
     /// Append bytes to the current log. Buffered; call [`sync`](Self::sync) to
@@ -218,16 +223,16 @@ impl SdCard {
         })
     }
 
+    // `DirEntry::file_type()` is unreliable on this board's FAT VFS
     fn read_dir_logs() -> Vec<String> {
         let Ok(dir) = fs::read_dir(MOUNT_POINT) else {
             return Vec::new();
         };
         dir.filter_map(|e| {
-            let e = e.ok()?;
-            if !e.file_type().ok()?.is_file() {
-                return None;
-            }
-            e.file_name().into_string().ok()
+            let name = e.ok()?.file_name().into_string().ok()?;
+            name.to_uppercase()
+                .ends_with(&LOG_EXT.to_uppercase())
+                .then_some(name)
         })
         .collect()
     }

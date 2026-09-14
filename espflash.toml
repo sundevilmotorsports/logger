@@ -2,4 +2,4 @@
 partition_table = "partitions.csv"
 
 [flash]
-size = "16MB"
+size = "8MB"

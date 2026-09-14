@@ -1,5 +1,5 @@
 [build]
-target = "riscv32imafc-esp-espidf"
+target = "xtensa-esp32s3-espidf"
 
 [target.'cfg(target_os = "espidf")']
 linker = "ldproxy"
@@ -10,14 +10,9 @@ rustflags = [ "--cfg",  "espidf_time64"]
 build-std = ["std", "panic_abort"]
 
 [env]
-MCU = "esp32p4"
+MCU = "esp32s3"
 ESP_IDF_VERSION = "v5.5.3"
 ESP_IDF_TOOLS_INSTALL_DIR = "workspace"
-# esp-idf-sys's bindgen pass doesn't inherit the -DCFG_TUSB_MCU define that the
-# real CMake build propagates from the esp_tinyusb component, so TinyUSB's
-# tusb_mcu.h can't tell it's building for ESP32-P4 and never sets its FreeRTOS
-# include path
-BINDGEN_EXTRA_CLANG_ARGS = "-DCFG_TUSB_MCU=OPT_MCU_ESP32P4"
 
 # Uncomment this if you have moved the target dir by setting CARGO_TARGET_DIR or similar.
 # Required for now due to embuild limitations.

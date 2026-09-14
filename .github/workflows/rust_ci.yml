@@ -36,11 +36,12 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git wget flex bison gperf cmake ninja-build ccache \
             libffi-dev libssl-dev dfu-util libusb-1.0-0 python3-venv
-      - name: Setup Rust
-        run: |
-          rustup toolchain install nightly-2026-06-28 --profile minimal --component rust-src,rustfmt,clippy
-          rustup target add --toolchain nightly-2026-06-28 riscv32imc-unknown-none-elf riscv32imac-unknown-none-elf riscv32imafc-unknown-none-elf
-          cargo install ldproxy
+      - name: Setup Xtensa Rust toolchain
+        uses: esp-rs/xtensa-toolchain@v1.5
+        with:
+          default: true
+          buildtargets: esp32s3
+          ldproxy: true
       - name: Enable caching
         uses: Swatinem/rust-cache@v2
       - name: Cache ESP-IDF
@@ -48,7 +49,7 @@ jobs:
         with:
           path: |
             .embuild
-          key: esp-idf-${{ runner.os }}-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults', 'components_esp32p4.lock') }}
+          key: esp-idf-${{ runner.os }}-${{ hashFiles('.cargo/config.toml', 'sdkconfig.defaults') }}
           restore-keys: |
             esp-idf-${{ runner.os }}-
       - name: Run command

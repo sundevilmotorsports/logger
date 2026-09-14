@@ -1,0 +1,277 @@
+{
+  "adc_channels": [
+    { "name": "l_FR_damper", "channel": 0 },
+    { "name": "l_RR_damper", "channel": 1 },
+    { "name": "p_R_brake", "channel": 2 },
+    { "name": "l_RL_damper", "channel": 3 },
+    { "name": "p_F_brake", "channel": 4 },
+    { "name": "l_FL_damper", "channel": 6 },
+    { "name": "Steering", "channel": 7 }
+  ],
+  "can_devices": [
+    {
+      "id": 863,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "DRS", "start": 0, "len": 1 }
+      ]}
+    },
+    {
+      "id": 864,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "r_Pitch", "start": 0, "len": 2, "signed": true, "scale": 1.0 },
+        { "name": "r_Roll", "start": 2, "len": 2, "signed": true, "scale": 1.0 },
+        { "name": "r_Yaw", "start": 4, "len": 2, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 865,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "a_Lat", "start": 0, "len": 2, "signed": true, "scale": 1.0 },
+        { "name": "a_Long", "start": 2, "len": 2, "signed": true, "scale": 1.0 },
+        { "name": "a_Vert", "start": 4, "len": 2, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 880,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "r_FL_wheel", "start": 0, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "FLW_OBJ", "start": 2, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "t_FL_amb", "start": 4, "len": 2, "big_endian": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 881,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FLT_TTA", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 882,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FLT_TTB", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 896,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "r_FR_wheel", "start": 0, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "FRW_OBJ", "start": 2, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "t_FR_amb", "start": 4, "len": 2, "big_endian": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 897,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FRT_TTA", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 898,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FRT_TTB", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 912,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "r_RR_wheel", "start": 0, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "RRW_OBJ", "start": 2, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "t_RR_amb", "start": 4, "len": 2, "big_endian": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 913,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RRT_TTA", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 914,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RRT_TTB", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 928,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "r_RL_wheel", "start": 0, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "RLW_OBJ", "start": 2, "len": 2, "big_endian": true, "scale": 1.0 },
+        { "name": "t_RL_amb", "start": 4, "len": 2, "big_endian": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 929,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RLT_TTA", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 930,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RLT_TTB", "start": 0, "len": 8 }
+      ]}
+    },
+    {
+      "id": 1000,
+      "extended": false,
+      "fd": false,
+      "signals": { "Muxed": {
+        "byte": 0,
+        "groups": [
+          {
+            "type_val": 0,
+            "signals": [
+              { "name": "r_engine", "start": 1, "len": 2, "big_endian": true, "scale": 1.0 },
+              { "name": "t_eng_coolant", "start": 3, "len": 1 },
+              { "name": "t_oil", "start": 4, "len": 1 },
+              { "name": "p_oil", "start": 5, "len": 2, "big_endian": true, "scale": 1.0 }
+            ]
+          },
+          {
+            "type_val": 1,
+            "signals": [
+              { "name": "Lamb_1", "start": 1, "len": 1, "scale": 0.01 },
+              { "name": "%_TPS", "start": 2, "len": 1 },
+              { "name": "n-Gear", "start": 3, "len": 1 },
+              { "name": "v_trans_out", "start": 4, "len": 2, "big_endian": true, "scale": 1.0 }
+            ]
+          },
+          {
+            "type_val": 2,
+            "signals": [
+              { "name": "%_APS_main", "start": 1, "len": 1 },
+              { "name": "p_Fuel", "start": 2, "len": 2, "big_endian": true, "scale": 1.0 }
+            ]
+          },
+          {
+            "type_val": 3,
+            "signals": [
+              { "name": "n_knock_count", "start": 1, "len": 1 },
+              { "name": "d_ign_angle", "start": 2, "len": 1 },
+              { "name": "%_ign_cut", "start": 3, "len": 1 },
+              { "name": "%_fuel_cut", "start": 4, "len": 1 },
+              { "name": "r_idle_target", "start": 5, "len": 1 },
+              { "name": "%_lambda_corr", "start": 6, "len": 1 },
+              { "name": "Lambda_Target_Err", "start": 7, "len": 1 }
+            ]
+          },
+          {
+            "type_val": 4,
+            "signals": [
+              { "name": "in_gear", "start": 1, "len": 1 },
+              { "name": "upshift_act", "start": 2, "len": 1 },
+              { "name": "downshift_act", "start": 3, "len": 1 },
+              { "name": "launch_ctrl_stat", "start": 4, "len": 1 },
+              { "name": "eng_fan_1", "start": 5, "len": 1 },
+              { "name": "%_fuel_left", "start": 6, "len": 1 }
+            ]
+          }
+        ]
+      }}
+    },
+    {
+      "id": 1002,
+      "extended": false,
+      "fd": false,
+      "signals": { "Muxed": {
+        "byte": 0,
+        "groups": [
+          {
+            "type_val": 0,
+            "signals": [
+              { "name": "p_MAP", "start": 5, "len": 2, "big_endian": true, "scale": 1.0 }
+            ]
+          }
+        ]
+      }}
+    },
+    {
+      "id": 1003,
+      "extended": false,
+      "fd": false,
+      "signals": { "Muxed": {
+        "byte": 0,
+        "groups": [
+          {
+            "type_val": 0,
+            "signals": [
+              { "name": "t_MAT", "start": 5, "len": 1 }
+            ]
+          }
+        ]
+      }}
+    },
+    {
+      "id": 1004,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "a_Lat_ecu", "start": 0, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 },
+        { "name": "a_Long_ecu", "start": 2, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 },
+        { "name": "a_Vert_ecu", "start": 4, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 1250,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FL_SG", "start": 0, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 1251,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "FR_SG", "start": 0, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 1252,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RR_SG", "start": 0, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 }
+      ]}
+    },
+    {
+      "id": 1253,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "RL_SG", "start": 0, "len": 2, "big_endian": true, "signed": true, "scale": 1.0 }
+      ]}
+    }
+  ]
+}

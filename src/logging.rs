@@ -1,6 +1,6 @@
 //! The logging thread. On a timer it snapshots [`State`], builds one fixed-width
-//! row from every configured source (CAN signals, ADC channels, GNSS, IMU), and
-//! appends it to the current SD log file. Each file starts with a self-
+//! row from every configured source (CAN signals, ADC channels, GNSS, power
+//! monitor), and appends it to the current SD log file. Each file starts with a self-
 //! describing header ([`sdm_utils::logfmt`]) so the desktop client can decode it
 //! without the config.
 
@@ -8,7 +8,7 @@ use crate::adc::{AdcChannel, AdcValue};
 use crate::can::{Signal, SignalValue, Signals};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
-use crate::imu::ImuReading;
+use crate::ina260::PowerReading;
 use crate::sd::SdCard;
 use crate::state::State;
 use esp_idf_svc::hal::cpu::Core;
@@ -82,31 +82,18 @@ impl LogSource for AdcColumns<'_> {
     }
 }
 
-struct ImuColumns(Option<ImuReading>);
+struct PowerColumns(Option<PowerReading>);
 
-impl LogSource for ImuColumns {
+impl LogSource for PowerColumns {
     fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
-        for name in [
-            "accel_x", "accel_y", "accel_z", "gyro_x", "gyro_y", "gyro_z", "imu_temp", "mag_x",
-            "mag_y", "mag_z",
-        ] {
-            push(name, ColType::F32);
-        }
+        push("amp_Batt", ColType::F32);
+        push("v_batt", ColType::F32);
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
         let r = self.0.unwrap_or_default();
-        for v in r.accel_g {
-            sink.write_all(&v.to_le_bytes())?;
-        }
-        for v in r.gyro_dps {
-            sink.write_all(&v.to_le_bytes())?;
-        }
-        sink.write_all(&r.temp_c.to_le_bytes())?;
-        for v in r.mag_ut {
-            sink.write_all(&v.to_le_bytes())?;
-        }
-        Ok(())
+        sink.write_all(&(r.current_raw as f32 * 1.25).to_le_bytes())?;
+        sink.write_all(&(r.voltage_raw as f32 * 1.25 / 1000.0).to_le_bytes())
     }
 }
 
@@ -114,11 +101,11 @@ struct GpsColumns(Option<Fix>);
 
 impl LogSource for GpsColumns {
     fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
-        push("lat", ColType::F32);
-        push("lon", ColType::F32);
+        push("gps_Lat", ColType::F32);
+        push("gps_Long", ColType::F32);
         push("alt", ColType::F32);
         push("sats", ColType::Raw(1));
-        push("quality", ColType::Raw(1));
+        push("gps_fix", ColType::Raw(1));
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
@@ -163,12 +150,12 @@ struct Scratch {
 
 impl Scratch {
     /// Copy the latest sensor readings out from under their locks
-    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<ImuReading>) {
+    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<PowerReading>) {
         self.can.clone_from(&state.sensors.can.lock());
         self.adc.clone_from(&state.sensors.adc.lock());
         let gps = state.sensors.gps.lock().clone();
-        let imu = *state.sensors.imu.lock();
-        (gps, imu)
+        let power = *state.sensors.power.lock();
+        (gps, power)
     }
 }
 
@@ -260,7 +247,7 @@ fn logger_thread(state: Arc<State>) -> ! {
             }
 
             if state.logging.active.load(Ordering::Relaxed) {
-                let (gps, imu) = scratch.refresh(&state);
+                let (gps, power) = scratch.refresh(&state);
                 let sources: [&dyn LogSource; 4] = [
                     &CanColumns {
                         signals: &can_signals,
@@ -271,7 +258,7 @@ fn logger_thread(state: Arc<State>) -> ! {
                         latest: &scratch.adc,
                     },
                     &GpsColumns(gps),
-                    &ImuColumns(imu),
+                    &PowerColumns(power),
                 ];
 
                 // A failed SD write means the card is gone or wedged
