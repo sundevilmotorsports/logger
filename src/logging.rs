@@ -205,7 +205,7 @@ pub fn spawn_logger(state: Arc<State>) -> bool {
     spawned
 }
 
-const LOG_HZ: u32 = 20;
+const LOG_HZ: u32 = 100;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
 fn logger_thread(state: Arc<State>) -> ! {
