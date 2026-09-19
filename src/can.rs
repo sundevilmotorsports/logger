@@ -189,8 +189,14 @@ fn collect_updates(
         .iter()
         .find(|d| d.id == raw_id && d.extended == extended)
     else {
+        log::warn!("Device not found in config: {}", raw_id);
         return;
     };
+
+    if device.id == 1000 {
+        log::info!("Recv from ecu");
+    }
+
     let active_signals: &[Signal] = match &device.signals {
         Signals::Fixed(sigs) => sigs,
         Signals::Muxed { byte, groups } => {
