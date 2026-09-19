@@ -106,17 +106,29 @@ impl LogSource for GpsColumns {
         push("alt", ColType::F32);
         push("sats", ColType::Raw(1));
         push("gps_fix", ColType::Raw(1));
+        push("v_car_gps", ColType::F32);
+        push("gps_heading", ColType::F32);
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
-        let (lat, lon, alt_m, sats, quality) = match &self.0 {
-            Some(fix) => (fix.lat, fix.lon, fix.alt_m, fix.sats, fix.quality),
-            None => (0.0, 0.0, 0.0, 0, 0),
+        let (lat, lon, alt_m, sats, quality, speed_kmh, heading_deg) = match &self.0 {
+            Some(fix) => (
+                fix.lat,
+                fix.lon,
+                fix.alt_m,
+                fix.sats,
+                fix.quality,
+                fix.speed_kmh,
+                fix.heading_deg,
+            ),
+            None => (0.0, 0.0, 0.0, 0, 0, 0.0, 0.0),
         };
         sink.write_all(&(lat as f32).to_le_bytes())?;
         sink.write_all(&(lon as f32).to_le_bytes())?;
         sink.write_all(&(alt_m as f32).to_le_bytes())?;
-        sink.write_all(&[sats, quality])
+        sink.write_all(&[sats, quality])?;
+        sink.write_all(&(speed_kmh as f32).to_le_bytes())?;
+        sink.write_all(&(heading_deg as f32).to_le_bytes())
     }
 }
 

@@ -10,6 +10,19 @@
   ],
   "can_devices": [
     {
+      "id": 944,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name": "data", "start": 0, "len": 1 },
+        { "name": "MLPOT", "start": 1, "len": 1 },
+        { "name": "MRPOT", "start": 2, "len": 1 },
+        { "name": "BLPOT", "start": 3, "len": 1 },
+        { "name": "BMPOT", "start": 4, "len": 1 },
+        { "name": "BRPOT", "start": 5, "len": 1 }
+      ]}
+    },
+    {
       "id": 863,
       "extended": false,
       "fd": false,
