@@ -95,6 +95,9 @@ impl Adc {
     }
 }
 
+const ADC_HZ: u32 = 500;
+const ADC_PERIOD: Duration = Duration::from_micros(1_000_000 / ADC_HZ as u64);
+
 fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
     crate::supervisor::run(move || -> Result<(), AdcError> {
         state.status.adc.store(false, Ordering::Relaxed);
@@ -111,7 +114,7 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
             state.status.adc.store(true, Ordering::Relaxed);
             *state.sensors.adc.lock() = latest;
 
-            std::thread::sleep(Duration::from_millis(50));
+            std::thread::sleep(ADC_PERIOD);
         }
     })
 }
