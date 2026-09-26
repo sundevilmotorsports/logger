@@ -1,6 +1,6 @@
 [package]
 name = "logger"
-version = "0.1.13"
+version = "0.1.14"
 authors = ["Nolan Peterson <ndpete2007@gmail.com>"]
 edition = "2021"
 resolver = "2"
@@ -17,14 +17,14 @@ opt-level = "s"
 debug = true    # Symbols are nice, and they don't increase the size on Flash
 opt-level = "z"
 [patch.crates-io]
-esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf-sys.git" }
-esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf-hal.git" }
-esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf-svc.git" }
+esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf.git" }
+esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf.git" }
+esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf.git" }
 
 [dependencies]
 base64 = "0.22"
 log = "0.4"
-esp-idf-svc = { version = "0.52.1", features = ["critical-section"] }
+esp-idf-svc = { version = "0.53", features = ["critical-section"] }
 parking_lot = "0.12"
 mcp2518fd = { git = "https://github.com/adom-inc/mcp2518fd.git" }
 sdm-utils = { git = "https://github.com/sundevilmotorsports/sdm-utils.git", features = ["alloc"] }
