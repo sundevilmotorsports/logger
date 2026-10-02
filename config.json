@@ -10,6 +10,35 @@
   ],
   "can_devices": [
     {
+      "id": 256,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name":"rate_lpm_1","start":0,"len":2,"big_endian":true,"scale":0.01 },
+        { "name":"total_volume_l_1","start":2,"len":4,"big_endian":true,"scale":0.001 }
+      ]}
+    },
+    {
+      "id": 257,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name":"rate_lpm_2","start":0,"len":2,"big_endian":true,"scale":0.01 },
+        { "name":"total_volume_l_2","start":2,"len":4,"big_endian":true,"scale":0.001 }
+      ]}
+    },
+    {
+      "id": 258,
+      "extended": false,
+      "fd": false,
+      "signals": { "Fixed": [
+        { "name":"temp_c_1","start":0,"len":2,"big_endian":true,"signed":true,"scale":0.01 },
+        { "name":"temp_c_2","start":2,"len":2,"big_endian":true,"signed":true,"scale":0.01 },
+        { "name":"temp_c_3","start":4,"len":2,"big_endian":true,"signed":true,"scale":0.01 },
+        { "name":"temp_c_4","start":6,"len":2,"big_endian":true,"signed":true,"scale":0.01 }
+      ]}
+    },
+    {
       "id": 944,
       "extended": false,
       "fd": false,
