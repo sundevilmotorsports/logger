@@ -11,7 +11,7 @@ use esp_idf_svc::sys::EspError;
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 type AdcSpi = SpiDeviceDriver<'static, SpiDriver<'static>>;
 
@@ -102,6 +102,7 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
     crate::supervisor::run(move || -> Result<(), AdcError> {
         state.status.adc.store(false, Ordering::Relaxed);
         log::info!("adc initialized");
+        let mut next_tick = Instant::now();
         loop {
             let channels = adc.read_all_channels()?;
 
@@ -114,7 +115,12 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
             state.status.adc.store(true, Ordering::Relaxed);
             *state.sensors.adc.lock() = latest;
 
-            std::thread::sleep(ADC_PERIOD);
+            next_tick += ADC_PERIOD;
+            let now = Instant::now();
+            if now > next_tick + ADC_PERIOD {
+                next_tick = now;
+            }
+            std::thread::sleep(next_tick.saturating_duration_since(now));
         }
     })
 }
