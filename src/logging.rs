@@ -5,7 +5,7 @@
 //! without the config.
 
 use crate::adc::{AdcChannel, AdcValue};
-use crate::can::{Signal, SignalValue, Signals};
+use crate::can::{Signal, Signals};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
 use crate::ina260::PowerReading;
@@ -49,10 +49,7 @@ impl LogSource for CanColumns<'_> {
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
         for sig in self.signals {
             let raw = self.latest.get(&sig.name).map(Vec::as_slice);
-            match sig.value(raw) {
-                SignalValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
-                SignalValue::Raw(bytes) => sink.write_all(&bytes)?,
-            }
+            sig.write_value(raw, sink)?;
         }
         Ok(())
     }
@@ -152,25 +149,6 @@ fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().adc_channels.clone()
 }
 
-/// Per-tick scratch, kept across ticks so the steady state allocates nothing
-#[derive(Default)]
-struct Scratch {
-    can: HashMap<String, Vec<u8>>,
-    adc: HashMap<u8, u16>,
-    row: Vec<u8>,
-}
-
-impl Scratch {
-    /// Copy the latest sensor readings out from under their locks
-    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<PowerReading>) {
-        self.can.clone_from(&state.sensors.can.lock());
-        self.adc.clone_from(&state.sensors.adc.lock());
-        let gps = state.sensors.gps.lock().clone();
-        let power = *state.sensors.power.lock();
-        (gps, power)
-    }
-}
-
 fn build_schema(sources: &[&dyn LogSource]) -> Schema {
     let mut schema = Schema::new();
     schema.push("timestamp", ColType::Raw(8));
@@ -236,7 +214,7 @@ fn logger_thread(state: Arc<State>) -> ! {
         // active tick, and again after a `next_log` roll.
         let mut header_written = false;
 
-        let mut scratch = Scratch::default();
+        let mut row: Vec<u8> = Vec::new();
         let mut next_tick = std::time::Instant::now();
         let mut last_sync = std::time::Instant::now();
 
@@ -259,19 +237,28 @@ fn logger_thread(state: Arc<State>) -> ! {
             }
 
             if state.logging.active.load(Ordering::Relaxed) {
-                let (gps, power) = scratch.refresh(&state);
-                let sources: [&dyn LogSource; 4] = [
-                    &CanColumns {
-                        signals: &can_signals,
-                        latest: &scratch.can,
-                    },
-                    &AdcColumns {
-                        channels: &adc_channels,
-                        latest: &scratch.adc,
-                    },
-                    &GpsColumns(gps),
-                    &PowerColumns(power),
-                ];
+                // Sensor locks are held only while header/row are built in memory
+                let (header, built) = {
+                    let gps = state.sensors.gps.lock().clone();
+                    let power = *state.sensors.power.lock();
+                    let can_latest = state.sensors.can.lock();
+                    let adc_latest = state.sensors.adc.lock();
+                    let sources: [&dyn LogSource; 4] = [
+                        &CanColumns {
+                            signals: &can_signals,
+                            latest: &can_latest,
+                        },
+                        &AdcColumns {
+                            channels: &adc_channels,
+                            latest: &adc_latest,
+                        },
+                        &GpsColumns(gps),
+                        &PowerColumns(power),
+                    ];
+                    let header = (!header_written).then(|| build_schema(&sources).encode_header());
+                    row.clear();
+                    (header, write_row(&mut row, &sources))
+                };
 
                 // A failed SD write means the card is gone or wedged
                 let write = |data: &[u8]| -> Result<(), EspError> {
@@ -279,16 +266,15 @@ fn logger_thread(state: Arc<State>) -> ! {
                         .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))
                 };
 
-                if !header_written {
-                    write(&build_schema(&sources).encode_header())?;
+                if let Some(header) = header {
+                    write(&header)?;
                     header_written = true;
                 }
 
-                scratch.row.clear();
-                if let Err(e) = write_row(&mut scratch.row, &sources) {
+                if let Err(e) = built {
                     log::warn!("failed to build log row: {e}");
                 } else {
-                    write(&scratch.row)?;
+                    write(&row)?;
                     prev_run_wrote = true;
                     state.status.sd.store(true, Ordering::Relaxed);
                 }

@@ -12,6 +12,7 @@ use esp_idf_svc::hal::delay::{Ets, TickType};
 use esp_idf_svc::sys::{esp_timer_get_time, EspError, ESP_ERR_TIMEOUT};
 use sdm_utils as sdm;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::Duration;
@@ -33,25 +34,27 @@ pub struct Signal {
     pub offset: f32,
 }
 
-pub enum SignalValue {
-    Raw(Vec<u8>),
-    Float(f32),
-}
-
 impl Signal {
-    pub fn value(&self, raw: Option<&[u8]>) -> SignalValue {
+    /// Write this signal's log column: a scaled `f32` if `scale` is set, else
+    /// the raw bytes zero-padded/truncated to `len`. No allocation.
+    pub fn write_value(&self, raw: Option<&[u8]>, sink: &mut dyn std::io::Write) -> std::io::Result<()> {
         match self.scale {
             Some(scale) => {
                 let n = raw.map(|r| self.raw_int(r)).unwrap_or(0);
-                SignalValue::Float(scale * (n as f32 - self.offset))
+                sink.write_all(&(scale * (n as f32 - self.offset)).to_le_bytes())
             }
             None => {
-                let mut buf = vec![0u8; self.len];
-                if let Some(r) = raw {
-                    let n = r.len().min(self.len);
-                    buf[..n].copy_from_slice(&r[..n]);
+                let raw = raw.unwrap_or(&[]);
+                let n = raw.len().min(self.len);
+                sink.write_all(&raw[..n])?;
+                
+                let mut pad = self.len - n;
+                while pad > 0 {
+                    let k = pad.min(8);
+                    sink.write_all(&[0u8; 8][..k])?;
+                    pad -= k;
                 }
-                SignalValue::Raw(buf)
+                Ok(())
             }
         }
     }
@@ -118,16 +121,6 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-/// A decoded signal update: signal name plus its raw bytes.
-pub type SignalUpdate = (String, Vec<u8>);
-
-/// A heartbeat seen on the bus, as `(node id, device type byte)`.
-pub type Heartbeat = (u8, u8);
-
-/// What [`Can::poll_once`] drains from the FIFO: decoded signal updates plus
-/// any heartbeats seen.
-pub type PollResult = (Vec<SignalUpdate>, Vec<Heartbeat>);
-
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
 
 pub struct Can {
@@ -144,29 +137,35 @@ impl Can {
         self.driver.start()
     }
 
-    pub fn poll_once(&mut self) -> Result<Option<PollResult>, EspError> {
+    /// Wait for one frame and fold it into `state`
+    pub fn poll_once(&mut self, state: &State) -> Result<(), EspError> {
         let frame = match self.driver.receive(TickType::from(RECEIVE_TIMEOUT).into()) {
             Ok(frame) => frame,
-            Err(e) if e.code() == ESP_ERR_TIMEOUT => return Ok(None),
+            Err(e) if e.code() == ESP_ERR_TIMEOUT => return Ok(()),
             Err(e) => return Err(e),
         };
-
-        let devices = CONFIGURATION.lock().can_devices.clone();
-        let mut updates = Vec::new();
-        let mut heartbeats = Vec::new();
 
         let raw_id = frame.identifier();
         let extended = frame.is_extended();
         let data = frame.data();
 
         if extended && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8 {
-            let device_type = data.first().copied().unwrap_or(0);
-            heartbeats.push((sdm::can_id_node(raw_id), device_type));
+            let node = CanNode {
+                device_type: data.first().copied().unwrap_or(0),
+                last_seen_us: unsafe { esp_timer_get_time() },
+            };
+            state.sensors.can_nodes.lock().insert(sdm::can_id_node(raw_id), node);
         } else {
-            collect_updates(&devices, raw_id, extended, data, &mut updates);
+            let config = CONFIGURATION.lock();
+            collect_updates(
+                &config.can_devices,
+                raw_id,
+                extended,
+                data,
+                &mut state.sensors.can.lock(),
+            );
         }
-
-        Ok(Some((updates, heartbeats)))
+        Ok(())
     }
 
     pub fn spawn(self, state: Arc<State>) -> bool {
@@ -183,7 +182,7 @@ fn collect_updates(
     raw_id: u32,
     extended: bool,
     data: &[u8],
-    out: &mut Vec<SignalUpdate>,
+    out: &mut HashMap<String, Vec<u8>>,
 ) {
     let Some(device) = devices
         .iter()
@@ -209,10 +208,16 @@ fn collect_updates(
     };
     for sig in active_signals {
         if sig.start + sig.len <= data.len() {
-            out.push((
-                sig.name.clone(),
-                data[sig.start..sig.start + sig.len].to_vec(),
-            ));
+            let bytes = &data[sig.start..sig.start + sig.len];
+            match out.get_mut(&sig.name) {
+                Some(v) => {
+                    v.clear();
+                    v.extend_from_slice(bytes);
+                }
+                None => {
+                    out.insert(sig.name.clone(), bytes.to_vec());
+                }
+            }
         }
     }
 }
@@ -225,27 +230,7 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
         log::info!("can initialized");
 
         loop {
-            if let Some((updates, heartbeats)) = can.poll_once()? {
-                if !updates.is_empty() {
-                    let mut latest = state.sensors.can.lock();
-                    for (name, bytes) in updates {
-                        latest.insert(name, bytes);
-                    }
-                }
-                if !heartbeats.is_empty() {
-                    let now = unsafe { esp_timer_get_time() };
-                    let mut nodes = state.sensors.can_nodes.lock();
-                    for (node, device_type) in heartbeats {
-                        nodes.insert(
-                            node,
-                            CanNode {
-                                device_type,
-                                last_seen_us: now,
-                            },
-                        );
-                    }
-                }
-            }
+            can.poll_once(&state)?;
         }
     })
 }

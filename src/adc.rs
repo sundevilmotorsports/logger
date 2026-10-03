@@ -8,7 +8,6 @@
 use crate::state::State;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::EspError;
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -106,14 +105,12 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
         loop {
             let channels = adc.read_all_channels()?;
 
-            let latest: HashMap<u8, u16> = channels
-                .into_iter()
-                .enumerate()
-                .map(|(ch, v)| (ch as u8, v))
-                .collect();
-
             state.status.adc.store(true, Ordering::Relaxed);
-            *state.sensors.adc.lock() = latest;
+            let mut latest = state.sensors.adc.lock();
+            for (ch, v) in channels.into_iter().enumerate() {
+                latest.insert(ch as u8, v);
+            }
+            drop(latest);
 
             next_tick += ADC_PERIOD;
             let now = Instant::now();
