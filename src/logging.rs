@@ -9,16 +9,19 @@ use crate::can::{Signal, Signals};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
 use crate::ina260::PowerReading;
+use crate::resources::Resources;
+use crate::resources::{self, ResourceMonitor};
 use crate::sd::SdCard;
 use crate::state::State;
 use crate::status::DeviceStatus;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::sys::{esp_timer_get_time, EspError};
+use parking_lot::Mutex;
 use sdm_utils::logfmt::{ColType, Schema};
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,6 +66,8 @@ struct AdcColumns<'a> {
 
 struct DeviceStatusColumns<'a> {
     status: &'a DeviceStatus,
+    can_bits: &'a AtomicU32,
+    resources: &'a Mutex<ResourceMonitor>,
 }
 
 impl LogSource for DeviceStatusColumns<'_> {
@@ -72,6 +77,7 @@ impl LogSource for DeviceStatusColumns<'_> {
         push("status_gnss", col_type(None, 1));
         push("status_logging", col_type(None, 1));
         push("status_sd", col_type(None, 1));
+        push("status_can_usage", col_type(None, 1));
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
@@ -80,6 +86,9 @@ impl LogSource for DeviceStatusColumns<'_> {
         sink.write_all(&vec![self.status.gnss.load(Ordering::Relaxed) as u8])?;
         sink.write_all(&vec![self.status.logging.load(Ordering::Relaxed) as u8])?;
         sink.write_all(&vec![self.status.sd.load(Ordering::Relaxed) as u8])?;
+        let can_bits = self.can_bits.load(Ordering::Relaxed);
+        let sample = self.resources.lock().sample(can_bits);
+        sink.write(&vec![sample.can_load as u8])?;
 
         Ok(())
     }
@@ -281,6 +290,8 @@ fn logger_thread(state: Arc<State>) -> ! {
                         &PowerColumns(power),
                         &DeviceStatusColumns {
                             status: &state.status,
+                            can_bits: &state.can_bits,
+                            resources: &state.resources,
                         },
                     ];
                     let header = (!header_written).then(|| build_schema(&sources).encode_header());

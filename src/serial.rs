@@ -191,7 +191,8 @@ fn handle_command(payload: &str, state: &Arc<State>) -> String {
         },
 
         Command::Resources => {
-            ok(serde_json::to_value(state.resources.lock().sample()).unwrap_or_default())
+            let can_bits = state.can_bits.load(Ordering::Relaxed);
+            ok(serde_json::to_value(state.resources.lock().sample(can_bits)).unwrap_or_default())
         }
 
         Command::ListLogs => {

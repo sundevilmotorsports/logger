@@ -127,6 +127,13 @@ pub struct CanDevice {
 
 const RECEIVE_TIMEOUT: Duration = Duration::from_millis(500);
 
+pub const BITRATE: u32 = 1_000_000;
+
+fn frame_bits(extended: bool, data_len: usize) -> u32 {
+    let overhead = if extended { 67 } else { 47 };
+    overhead + 8 * data_len as u32
+}
+
 pub struct Can {
     driver: CanDriver<'static>,
 }
@@ -152,6 +159,9 @@ impl Can {
         let raw_id = frame.identifier();
         let extended = frame.is_extended();
         let data = frame.data();
+        state
+            .can_bits
+            .fetch_add(frame_bits(extended, data.len()), Ordering::Relaxed);
 
         if extended && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8 {
             let node = CanNode {
