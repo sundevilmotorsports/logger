@@ -37,7 +37,11 @@ pub struct Signal {
 impl Signal {
     /// Write this signal's log column: a scaled `f32` if `scale` is set, else
     /// the raw bytes zero-padded/truncated to `len`. No allocation.
-    pub fn write_value(&self, raw: Option<&[u8]>, sink: &mut dyn std::io::Write) -> std::io::Result<()> {
+    pub fn write_value(
+        &self,
+        raw: Option<&[u8]>,
+        sink: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
         match self.scale {
             Some(scale) => {
                 let n = raw.map(|r| self.raw_int(r)).unwrap_or(0);
@@ -47,7 +51,7 @@ impl Signal {
                 let raw = raw.unwrap_or(&[]);
                 let n = raw.len().min(self.len);
                 sink.write_all(&raw[..n])?;
-                
+
                 let mut pad = self.len - n;
                 while pad > 0 {
                     let k = pad.min(8);
@@ -154,7 +158,11 @@ impl Can {
                 device_type: data.first().copied().unwrap_or(0),
                 last_seen_us: unsafe { esp_timer_get_time() },
             };
-            state.sensors.can_nodes.lock().insert(sdm::can_id_node(raw_id), node);
+            state
+                .sensors
+                .can_nodes
+                .lock()
+                .insert(sdm::can_id_node(raw_id), node);
         } else {
             let config = CONFIGURATION.lock();
             collect_updates(
@@ -191,10 +199,6 @@ fn collect_updates(
         log::warn!("Device not found in config: {}", raw_id);
         return;
     };
-
-    if device.id == 1000 {
-        log::info!("Recv from ecu");
-    }
 
     let active_signals: &[Signal] = match &device.signals {
         Signals::Fixed(sigs) => sigs,
