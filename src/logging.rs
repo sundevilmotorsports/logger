@@ -11,6 +11,7 @@ use crate::gnss::Fix;
 use crate::ina260::PowerReading;
 use crate::sd::SdCard;
 use crate::state::State;
+use crate::status::DeviceStatus;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::sys::{esp_timer_get_time, EspError};
@@ -58,6 +59,30 @@ impl LogSource for CanColumns<'_> {
 struct AdcColumns<'a> {
     channels: &'a [AdcChannel],
     latest: &'a HashMap<u8, u16>,
+}
+
+struct DeviceStatusColumns<'a> {
+    status: &'a DeviceStatus,
+}
+
+impl LogSource for DeviceStatusColumns<'_> {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        push("status_adc", col_type(None, 1));
+        push("status_can", col_type(None, 1));
+        push("status_gnss", col_type(None, 1));
+        push("status_logging", col_type(None, 1));
+        push("status_sd", col_type(None, 1));
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        sink.write_all(&vec![self.status.adc.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.can.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.gnss.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.logging.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.sd.load(Ordering::Relaxed) as u8])?;
+
+        Ok(())
+    }
 }
 
 impl LogSource for AdcColumns<'_> {
@@ -243,7 +268,7 @@ fn logger_thread(state: Arc<State>) -> ! {
                     let power = *state.sensors.power.lock();
                     let can_latest = state.sensors.can.lock();
                     let adc_latest = state.sensors.adc.lock();
-                    let sources: [&dyn LogSource; 4] = [
+                    let sources: [&dyn LogSource; 5] = [
                         &CanColumns {
                             signals: &can_signals,
                             latest: &can_latest,
@@ -254,6 +279,9 @@ fn logger_thread(state: Arc<State>) -> ! {
                         },
                         &GpsColumns(gps),
                         &PowerColumns(power),
+                        &DeviceStatusColumns {
+                            status: &state.status,
+                        },
                     ];
                     let header = (!header_written).then(|| build_schema(&sources).encode_header());
                     row.clear();
