@@ -194,8 +194,8 @@
             "type_val": 0,
             "signals": [
               { "name": "r_engine", "start": 1, "len": 2, "big_endian": true, "scale": 1.0 },
-              { "name": "t_eng_coolant", "start": 3, "len": 1 },
-              { "name": "t_oil", "start": 4, "len": 1 },
+              { "name": "t_eng_coolant", "start": 3, "len": 1, "scale": 1.0, "offset": -50.0 },
+              { "name": "t_oil", "start": 4, "len": 1, "scale": 1.0, "offset": -50.0 },
               { "name": "p_oil", "start": 5, "len": 2, "big_endian": true, "scale": 1.0 }
             ]
           },
