@@ -251,12 +251,23 @@ impl Can {
     /// all 0x00000000 means MISO is held low.
     fn dump_spi_diagnostics(&mut self) {
         let bus = self.bus;
-        let devid = self.controller.read_register::<DeviceIdRegister>().map(u32::from);
-        let osc = self.controller.read_register::<OscillatorControlRegister>().map(u32::from);
-        let c1con = self.controller.read_register::<CanControlRegister>().map(u32::from);
+        let devid = self
+            .controller
+            .read_register::<DeviceIdRegister>()
+            .map(u32::from);
+        let osc = self
+            .controller
+            .read_register::<OscillatorControlRegister>()
+            .map(u32::from);
+        let c1con = self
+            .controller
+            .read_register::<CanControlRegister>()
+            .map(u32::from);
         log::info!(
             "{bus:?} MCP2518FD raw: DEVID={:08X?} OSC={:08X?} C1CON={:08X?}",
-            devid, osc, c1con
+            devid,
+            osc,
+            c1con
         );
 
         let pattern: u32 = 0xA5C3_5A3C;
@@ -363,7 +374,10 @@ impl Can {
                         *slot = s.bytes[start + i];
                     }
                 }
-                if self.send_ota_frame(state, data_id, &frame[..1 + n]).is_err() {
+                if self
+                    .send_ota_frame(state, data_id, &frame[..1 + n])
+                    .is_err()
+                {
                     break; // transient; the nodes next ACK rewinds
                 }
                 off += n as u32;

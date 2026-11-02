@@ -50,8 +50,8 @@ impl ResourceMonitor {
                 });
 
                 let bits_delta = can_bits.wrapping_sub(prev.can_bits);
-                let bus_bits = elapsed as f32 * (can::BITRATE * can::BUS_COUNT) as f32
-                    / 1_000_000.0f32;
+                let bus_bits =
+                    elapsed as f32 * (can::BITRATE * can::BUS_COUNT) as f32 / 1_000_000.0f32;
                 let can_load = (bits_delta as f32 / bus_bits * 100.0f32).clamp(0.0, 100.0);
 
                 (cpu_load, can_load)

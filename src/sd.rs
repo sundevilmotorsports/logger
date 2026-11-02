@@ -9,8 +9,10 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use esp_idf_svc::fs::fatfs::Fatfs;
-use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio44, Gpio45};
-use esp_idf_svc::hal::sd::mmc::{config::Configuration as SdMmcHostConfiguration, SdMmcHostDriver, SDMMC0};
+use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio44};
+use esp_idf_svc::hal::sd::mmc::{
+    config::Configuration as SdMmcHostConfiguration, SdMmcHostDriver, SDMMC0,
+};
 use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
 use esp_idf_svc::sys::EspError;

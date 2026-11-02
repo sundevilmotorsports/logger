@@ -80,14 +80,14 @@ impl LogSource for DeviceStatusColumns<'_> {
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
-        sink.write_all(&vec![self.status.adc.load(Ordering::Relaxed) as u8])?;
-        sink.write_all(&vec![self.status.can.load(Ordering::Relaxed) as u8])?;
-        sink.write_all(&vec![self.status.gnss.load(Ordering::Relaxed) as u8])?;
-        sink.write_all(&vec![self.status.logging.load(Ordering::Relaxed) as u8])?;
-        sink.write_all(&vec![self.status.sd.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&[self.status.adc.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&[self.status.can.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&[self.status.gnss.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&[self.status.logging.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&[self.status.sd.load(Ordering::Relaxed) as u8])?;
         let can_bits = self.can_bits.load(Ordering::Relaxed);
         let sample = self.resources.lock().sample(can_bits);
-        sink.write(&vec![sample.can_load as u8])?;
+        sink.write_all(&[sample.can_load as u8])?;
 
         Ok(())
     }
