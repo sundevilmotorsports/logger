@@ -29,3 +29,8 @@ CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
 CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
 
 CONFIG_ESP32_RTC_CLK_SRC_EXT_CRYS=y
+
+# Long filename support: FATFS defaults to 8.3 short names only, under which
+# "config.json" (a 4-char extension) is an invalid filename and fails to
+# open with EINVAL, at the VFS layer, before ever touching the card.
+CONFIG_FATFS_LFN_HEAP=y

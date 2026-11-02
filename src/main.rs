@@ -55,7 +55,7 @@ fn main() {
     info!("Peripherials");
 
     let mut ldo4 = LdoChannel::new(p.ldo4, &LdoChannelConfig::new(3300)).unwrap();
-    ldo4.adjust_voltage(3300).unwrap();
+    ldo4.adjust_voltage(1800).unwrap();
     unsafe {
         let out = (*esp_idf_svc::sys::__getreent())._stdout as *mut esp_idf_svc::sys::FILE;
         esp_ldo_dump(out);
@@ -105,10 +105,10 @@ fn main() {
     }
 
     let can1 = spi.clone().and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio34), &SpiConfig::new())
+        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio8), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN1 SPI device init failed: {e:?}"))
             .ok()?;
-        let int_pin = PinDriver::input(p.pins.gpio11, Pull::Up)
+        let int_pin = PinDriver::input(p.pins.gpio54, Pull::Up)
             .inspect_err(|e| log::error!("CAN1 INT pin init failed: {e:?}"))
             .ok()?;
         Some(Can::new(spi_device, int_pin, can::Bus::Module))
@@ -120,10 +120,10 @@ fn main() {
     }
 
     let can2 = spi3.and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio10), &SpiConfig::new())
+        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio48), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN2 SPI device init failed: {e:?}"))
             .ok()?;
-        let int_pin = PinDriver::input(p.pins.gpio9, Pull::Up)
+        let int_pin = PinDriver::input(p.pins.gpio52, Pull::Up)
             .inspect_err(|e| log::error!("CAN2 INT pin init failed: {e:?}"))
             .ok()?;
         Some(Can::new(spi_device, int_pin, can::Bus::Engine))
@@ -135,7 +135,7 @@ fn main() {
     }
 
     let adc = spi.and_then(|spi| {
-        SpiDeviceDriver::new(spi, Some(p.pins.gpio27), &SpiConfig::new())
+        SpiDeviceDriver::new(spi, Some(p.pins.gpio28), &SpiConfig::new())
             .inspect_err(|e| log::error!("ADC SPI device init failed: {e:?}"))
             .ok()
             .map(|spi_device| Adc::new(spi_device, adc::Range::R5V))
@@ -146,7 +146,7 @@ fn main() {
         }
     }
 
-    let imu = I2cDriver::new(p.i2c0, p.pins.gpio2, p.pins.gpio3, &I2cConfig::new())
+    let imu = I2cDriver::new(p.i2c0, p.pins.gpio47, p.pins.gpio46, &I2cConfig::new())
         .inspect_err(|e| log::error!("I2C driver init failed: {e:?}"))
         .ok()
         .map(Imu::new);

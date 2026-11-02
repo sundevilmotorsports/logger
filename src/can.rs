@@ -11,6 +11,8 @@ use esp_idf_svc::hal::delay::{Ets, FreeRtos};
 use esp_idf_svc::hal::gpio::{Input, PinDriver};
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::esp_timer_get_time;
+use mcp2518fd::memory::chip::{DeviceIdRegister, OscillatorControlRegister};
+use mcp2518fd::memory::controller::configuration::CanControlRegister;
 use mcp2518fd::memory::controller::fifo::PayloadSize;
 use mcp2518fd::{
     id::{ExtendedId, Id, StandardId},
@@ -25,6 +27,7 @@ use mcp2518fd::{
 };
 use sdm_utils as sdm;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
@@ -45,25 +48,31 @@ pub struct Signal {
     pub offset: f32,
 }
 
-pub enum SignalValue {
-    Raw(Vec<u8>),
-    Float(f32),
-}
-
 impl Signal {
-    pub fn value(&self, raw: Option<&[u8]>) -> SignalValue {
+    /// Write this signal's log column: a scaled `f32` if `scale` is set, else
+    /// the raw bytes zero-padded/truncated to `len`. No allocation.
+    pub fn write_value(
+        &self,
+        raw: Option<&[u8]>,
+        sink: &mut dyn std::io::Write,
+    ) -> std::io::Result<()> {
         match self.scale {
             Some(scale) => {
                 let n = raw.map(|r| self.raw_int(r)).unwrap_or(0);
-                SignalValue::Float(scale * (n as f32 - self.offset))
+                sink.write_all(&(scale * (n as f32 - self.offset)).to_le_bytes())
             }
             None => {
-                let mut buf = vec![0u8; self.len];
-                if let Some(r) = raw {
-                    let n = r.len().min(self.len);
-                    buf[..n].copy_from_slice(&r[..n]);
+                let raw = raw.unwrap_or(&[]);
+                let n = raw.len().min(self.len);
+                sink.write_all(&raw[..n])?;
+
+                let mut pad = self.len - n;
+                while pad > 0 {
+                    let k = pad.min(8);
+                    sink.write_all(&[0u8; 8][..k])?;
+                    pad -= k;
                 }
-                SignalValue::Raw(buf)
+                Ok(())
             }
         }
     }
@@ -131,15 +140,17 @@ pub struct CanDevice {
     pub signals: Signals,
 }
 
-/// A decoded signal update: signal name plus its raw bytes.
-pub type SignalUpdate = (String, Vec<u8>);
+/// Nominal (arbitration-phase) bitrate of each bus.
+pub const BITRATE: u32 = 500_000;
+/// Number of buses feeding `State::can_bits` (Module + Engine).
+pub const BUS_COUNT: u32 = 2;
 
-/// A heartbeat seen on the bus, as `(node id, device type byte)`.
-pub type Heartbeat = (u8, u8);
-
-/// What [`Can::poll_once`] drains from the FIFO: decoded signal updates plus
-/// any heartbeats seen.
-pub type PollResult = (Vec<SignalUpdate>, Vec<Heartbeat>);
+/// Approximate on-wire bits for a frame, ignoring bit stuffing and the FD
+/// data-phase speedup.
+fn frame_bits(extended: bool, data_len: usize) -> u32 {
+    let overhead = if extended { 67 } else { 47 };
+    overhead + 8 * data_len as u32
+}
 
 /// Concrete over the board's one SPI device (nothing else is plugged in) and
 /// owns `int_pin`, since the driver crate has no idea which GPIO it's wired to.
@@ -164,6 +175,9 @@ impl Can {
 
     pub fn init(&mut self, delay: &mut impl DelayNs) -> Result<(), ConfigError> {
         self.controller.reset().map_err(ConfigError::Other)?;
+        // Give the oscillator time to start; SPI is clocked from SYSCLK
+        delay.delay_ms(5);
+        self.dump_spi_diagnostics();
 
         match self.controller.verify_spi_communications() {
             Ok(()) => log::info!("{:?} MCP2518FD SPI RAM echo OK", self.bus),
@@ -230,46 +244,56 @@ impl Can {
         Ok(())
     }
 
-    /// Drains the FIFO; unrecognized IDs are discarded so it never backs up.
-    /// Returns decoded signal updates plus any heartbeats seen as
-    /// `(node id, device type byte)`.
-    pub fn poll_once(&mut self) -> Result<PollResult, Error> {
-        let devices = CONFIGURATION.lock().can_devices.clone();
+    /// Logs raw register reads and one RAM echo so a dead SPI link can be told
+    /// apart from a live chip. Expected after reset: DEVID 0x0000001X,
+    /// OSC 0x00000460 (OSCRDY set), C1CON 0x04980760. All 0xFFFFFFFF means
+    /// MISO is floating (chip unpowered, unclocked, or CS not reaching it);
+    /// all 0x00000000 means MISO is held low.
+    fn dump_spi_diagnostics(&mut self) {
+        let bus = self.bus;
+        let devid = self.controller.read_register::<DeviceIdRegister>().map(u32::from);
+        let osc = self.controller.read_register::<OscillatorControlRegister>().map(u32::from);
+        let c1con = self.controller.read_register::<CanControlRegister>().map(u32::from);
+        log::info!(
+            "{bus:?} MCP2518FD raw: DEVID={:08X?} OSC={:08X?} C1CON={:08X?}",
+            devid, osc, c1con
+        );
 
-        let mut updates = Vec::new();
-        let mut heartbeats = Vec::new();
+        let pattern: u32 = 0xA5C3_5A3C;
+        let mut read_back = [0u8; 4];
+        let echo = self
+            .controller
+            .write_ram(0x400, &pattern.to_le_bytes())
+            .and_then(|()| self.controller.read_ram(0x400, &mut read_back));
+        log::info!(
+            "{bus:?} MCP2518FD RAM echo: wrote {pattern:08X}, read {:08X} ({echo:?})",
+            u32::from_le_bytes(read_back)
+        );
+    }
 
+    /// Drains the FIFO and folds every frame into `state`; unrecognized IDs
+    /// are discarded so it never backs up.
+    pub fn poll_once(&mut self, state: &State) -> Result<(), Error> {
         while let Some(msg) = self.controller.rx_fifo_get_next(FifoNumber::Fifo1)? {
             let (raw_id, extended) = match msg.id() {
                 Id::Standard(id) => (id.as_raw() as u32, false),
                 Id::Extended(id) => (id.as_raw(), true),
             };
-            if self.bus == Bus::Module
-                && extended
-                && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8
-            {
-                let device_type = msg.data().first().copied().unwrap_or(0);
-                heartbeats.push((sdm::can_id_node(raw_id), device_type));
-                continue;
-            }
-            collect_updates(
-                &devices,
-                self.bus,
-                raw_id,
-                extended,
-                msg.data(),
-                &mut updates,
-            );
+            handle_frame(state, self.bus, raw_id, extended, msg.data());
         }
-        Ok((updates, heartbeats))
+        Ok(())
     }
 
-    fn send_heartbeat(&mut self) -> Result<(), Error> {
+    fn send_heartbeat(&mut self, state: &State) -> Result<(), Error> {
         let id = sdm::can_id(sdm::Msg::Heartbeat as u8, sdm::Node::Logger as u8);
         let payload = [sdm::DeviceType::Logger as u8];
         let msg = TxMessage::new_2_0(ExtendedId::new(id).unwrap(), &payload).unwrap();
         self.controller
-            .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
+            .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)?;
+        state
+            .can_bits
+            .fetch_add(frame_bits(true, payload.len()), Ordering::Relaxed);
+        Ok(())
     }
 
     /// Streams `req.size` firmware bytes to `req.node` over CAN as the serial
@@ -294,10 +318,10 @@ impl Can {
         let start_id = sdm::can_id(sdm::Msg::OtaStart as u8, req.node);
         let mut started = false;
         for _ in 0..OTA_RETRIES {
-            if self.send_ota_frame(start_id, &start).is_err() {
+            if self.send_ota_frame(state, start_id, &start).is_err() {
                 continue;
             }
-            match self.wait_ota_ack(req.node) {
+            match self.wait_ota_ack(state, req.node) {
                 Some((_, 0)) => {
                     started = true;
                     break;
@@ -339,14 +363,14 @@ impl Can {
                         *slot = s.bytes[start + i];
                     }
                 }
-                if self.send_ota_frame(data_id, &frame[..1 + n]).is_err() {
+                if self.send_ota_frame(state, data_id, &frame[..1 + n]).is_err() {
                     break; // transient; the nodes next ACK rewinds
                 }
                 off += n as u32;
                 Ets.delay_us(OTA_FRAME_GAP_US);
             }
 
-            match self.wait_ota_ack(req.node) {
+            match self.wait_ota_ack(state, req.node) {
                 Some((acked, 0)) => {
                     stalls = 0;
                     off = acked; // resume where the node actually is
@@ -373,17 +397,17 @@ impl Can {
         // END (retry until ACKed)
         let end_id = sdm::can_id(sdm::Msg::OtaEnd as u8, req.node);
         for _ in 0..OTA_RETRIES {
-            if self.send_ota_frame(end_id, &[]).is_err() {
+            if self.send_ota_frame(state, end_id, &[]).is_err() {
                 continue;
             }
-            if let Some((_, status)) = self.wait_ota_ack(req.node) {
+            if let Some((_, status)) = self.wait_ota_ack(state, req.node) {
                 return finish(status);
             }
         }
         finish(OTA_STATUS_TIMEOUT);
     }
 
-    fn send_ota_frame(&mut self, id: u32, data: &[u8]) -> Result<(), Error> {
+    fn send_ota_frame(&mut self, state: &State, id: u32, data: &[u8]) -> Result<(), Error> {
         let msg = TxMessage::new_2_0(ExtendedId::new(id).unwrap(), data).unwrap();
         for _ in 0..OTA_TX_FIFO_RETRIES {
             match self
@@ -391,6 +415,12 @@ impl Can {
                 .tx_fifo_transmit_message(FifoNumber::Fifo2, &msg)
             {
                 Err(Error::FifoFull) => Ets.delay_us(200),
+                Ok(()) => {
+                    state
+                        .can_bits
+                        .fetch_add(frame_bits(true, data.len()), Ordering::Relaxed);
+                    return Ok(());
+                }
                 other => return other,
             }
         }
@@ -398,18 +428,26 @@ impl Can {
         Err(Error::FifoFull)
     }
 
-    /// Waits for an `OTA_ACK` from `node`
-    fn wait_ota_ack(&mut self, node: u8) -> Option<(u32, u8)> {
+    /// Waits for an `OTA_ACK` from `node`. Other frames still land in `state`
+    /// so logging keeps running through a transfer.
+    fn wait_ota_ack(&mut self, state: &State, node: u8) -> Option<(u32, u8)> {
         let ack_id = sdm::can_id(sdm::Msg::OtaAck as u8, node);
         let deadline = unsafe { esp_timer_get_time() } + OTA_ACK_TIMEOUT_US;
         while unsafe { esp_timer_get_time() } < deadline {
             match self.controller.rx_fifo_get_next(FifoNumber::Fifo1) {
                 Ok(Some(msg)) => {
-                    let is_ack = matches!(msg.id(), Id::Extended(id) if id.as_raw() == ack_id);
+                    let (raw_id, extended) = match msg.id() {
+                        Id::Standard(id) => (id.as_raw() as u32, false),
+                        Id::Extended(id) => (id.as_raw(), true),
+                    };
                     let d = msg.data();
-                    if is_ack && d.len() >= 5 {
+                    if extended && raw_id == ack_id && d.len() >= 5 {
+                        state
+                            .can_bits
+                            .fetch_add(frame_bits(true, d.len()), Ordering::Relaxed);
                         return Some((u32::from_le_bytes([d[0], d[1], d[2], d[3]]), d[4]));
                     }
+                    handle_frame(state, self.bus, raw_id, extended, d);
                 }
                 Ok(None) => Ets.delay_us(200),
                 Err(_) => return None,
@@ -434,13 +472,43 @@ const OTA_FEED_TIMEOUT_US: i64 = 10_000_000; // serial stopped feeding bytes
 const OTA_STATUS_TIMEOUT: u8 = 0xFE;
 const OTA_STATUS_STARVED: u8 = 0xFD; // serial upload stalled
 
+/// Fold one received frame into `state`: Module-bus heartbeats into
+/// `can_nodes`, configured devices into `sensors.can`.
+fn handle_frame(state: &State, bus: Bus, raw_id: u32, extended: bool, data: &[u8]) {
+    state
+        .can_bits
+        .fetch_add(frame_bits(extended, data.len()), Ordering::Relaxed);
+
+    if bus == Bus::Module && extended && sdm::can_id_msg(raw_id) == sdm::Msg::Heartbeat as u8 {
+        let node = CanNode {
+            device_type: data.first().copied().unwrap_or(0),
+            last_seen_us: unsafe { esp_timer_get_time() },
+        };
+        state
+            .sensors
+            .can_nodes
+            .lock()
+            .insert(sdm::can_id_node(raw_id), node);
+    } else {
+        let config = CONFIGURATION.lock();
+        collect_updates(
+            &config.can_devices,
+            bus,
+            raw_id,
+            extended,
+            data,
+            &mut state.sensors.can.lock(),
+        );
+    }
+}
+
 fn collect_updates(
     devices: &[CanDevice],
     bus: Bus,
     raw_id: u32,
     extended: bool,
     data: &[u8],
-    out: &mut Vec<SignalUpdate>,
+    out: &mut HashMap<String, Vec<u8>>,
 ) {
     let Some(device) = devices
         .iter()
@@ -460,10 +528,16 @@ fn collect_updates(
     };
     for sig in active_signals {
         if sig.start + sig.len <= data.len() {
-            out.push((
-                sig.name.clone(),
-                data[sig.start..sig.start + sig.len].to_vec(),
-            ));
+            let bytes = &data[sig.start..sig.start + sig.len];
+            match out.get_mut(&sig.name) {
+                Some(v) => {
+                    v.clear();
+                    v.extend_from_slice(bytes);
+                }
+                None => {
+                    out.insert(sig.name.clone(), bytes.to_vec());
+                }
+            }
         }
     }
 }
@@ -556,26 +630,8 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
             esp_idf_svc::hal::task::block_on(can.int_pin.wait_for_falling_edge())
                 .map_err(RunError::Pin)?;
 
-            let (updates, heartbeats) = can.poll_once().map_err(RunError::Comm)?;
-            if !updates.is_empty() {
-                let mut latest = state.sensors.can.lock();
-                for (name, bytes) in updates {
-                    latest.insert(name, bytes);
-                }
-            }
+            can.poll_once(&state).map_err(RunError::Comm)?;
             let now = unsafe { esp_timer_get_time() };
-            if !heartbeats.is_empty() {
-                let mut nodes = state.sensors.can_nodes.lock();
-                for (node, device_type) in heartbeats {
-                    nodes.insert(
-                        node,
-                        CanNode {
-                            device_type,
-                            last_seen_us: now,
-                        },
-                    );
-                }
-            }
 
             if can.bus == Bus::Module {
                 let ota_req = state.ota.request.lock().take();
@@ -588,7 +644,7 @@ fn run(mut can: Can, state: Arc<State>) -> ! {
 
                 if now - last_heartbeat_us >= HEARTBEAT_INTERVAL_US {
                     last_heartbeat_us = now;
-                    if let Err(e) = can.send_heartbeat() {
+                    if let Err(e) = can.send_heartbeat(&state) {
                         log::warn!("heartbeat tx failed: {e:?}");
                     } else {
                         state.sensors.can_nodes.lock().insert(

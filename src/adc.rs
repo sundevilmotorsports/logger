@@ -6,10 +6,9 @@ use crate::state::State;
 use esp_idf_svc::hal::spi::{SpiDeviceDriver, SpiDriver};
 use esp_idf_svc::sys::EspError;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AdcChannel {
@@ -113,10 +112,14 @@ fn control_word(channel: u8, range: Range) -> u16 {
     MANUAL_MODE | WRITE_ENABLE | addr | range_bit
 }
 
+const ADC_HZ: u32 = 500;
+const ADC_PERIOD: Duration = Duration::from_micros(1_000_000 / ADC_HZ as u64);
+
 fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
     crate::supervisor::run(move || -> Result<(), AdcError> {
         state.status.adc.store(false, Ordering::Relaxed);
         log::info!("adc initialized");
+        let mut next_tick = Instant::now();
         loop {
             let channels: Vec<u8> = CONFIGURATION
                 .lock()
@@ -125,11 +128,12 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
                 .map(|c| c.channel)
                 .collect();
 
-            let mut latest = HashMap::with_capacity(channels.len());
+            let mut read_any = false;
             for ch in channels {
                 match adc.read_channel(ch) {
                     Ok(raw) => {
-                        latest.insert(ch, raw);
+                        state.sensors.adc.lock().insert(ch, raw);
+                        read_any = true;
                     }
 
                     Err(AdcError::ChannelMismatch { expected, got }) => {
@@ -140,13 +144,14 @@ fn poll_loop(mut adc: Adc, state: Arc<State>) -> ! {
                 }
             }
 
-            state
-                .status
-                .adc
-                .store(!latest.is_empty(), Ordering::Relaxed);
-            *state.sensors.adc.lock() = latest;
+            state.status.adc.store(read_any, Ordering::Relaxed);
 
-            std::thread::sleep(Duration::from_millis(50));
+            next_tick += ADC_PERIOD;
+            let now = Instant::now();
+            if now > next_tick + ADC_PERIOD {
+                next_tick = now;
+            }
+            std::thread::sleep(next_tick.saturating_duration_since(now));
         }
     })
 }

@@ -5,19 +5,22 @@
 //! without the config.
 
 use crate::adc::{AdcChannel, AdcValue};
-use crate::can::{Signal, SignalValue, Signals};
+use crate::can::{Signal, Signals};
 use crate::configuration::CONFIGURATION;
 use crate::gnss::Fix;
 use crate::imu::ImuReading;
+use crate::resources::ResourceMonitor;
 use crate::sd::SdCard;
 use crate::state::State;
+use crate::status::DeviceStatus;
 use esp_idf_svc::hal::cpu::Core;
 use esp_idf_svc::hal::task::thread::ThreadSpawnConfiguration;
 use esp_idf_svc::sys::{esp_timer_get_time, EspError};
+use parking_lot::Mutex;
 use sdm_utils::logfmt::{ColType, Schema};
 use std::collections::HashMap;
 use std::io::{self, Write};
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -49,10 +52,7 @@ impl LogSource for CanColumns<'_> {
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
         for sig in self.signals {
             let raw = self.latest.get(&sig.name).map(Vec::as_slice);
-            match sig.value(raw) {
-                SignalValue::Float(f) => sink.write_all(&f.to_le_bytes())?,
-                SignalValue::Raw(bytes) => sink.write_all(&bytes)?,
-            }
+            sig.write_value(raw, sink)?;
         }
         Ok(())
     }
@@ -61,6 +61,36 @@ impl LogSource for CanColumns<'_> {
 struct AdcColumns<'a> {
     channels: &'a [AdcChannel],
     latest: &'a HashMap<u8, u16>,
+}
+
+struct DeviceStatusColumns<'a> {
+    status: &'a DeviceStatus,
+    can_bits: &'a AtomicU32,
+    resources: &'a Mutex<ResourceMonitor>,
+}
+
+impl LogSource for DeviceStatusColumns<'_> {
+    fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
+        push("status_adc", col_type(None, 1));
+        push("status_can", col_type(None, 1));
+        push("status_gnss", col_type(None, 1));
+        push("status_logging", col_type(None, 1));
+        push("status_sd", col_type(None, 1));
+        push("status_can_usage", col_type(None, 1));
+    }
+
+    fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
+        sink.write_all(&vec![self.status.adc.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.can.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.gnss.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.logging.load(Ordering::Relaxed) as u8])?;
+        sink.write_all(&vec![self.status.sd.load(Ordering::Relaxed) as u8])?;
+        let can_bits = self.can_bits.load(Ordering::Relaxed);
+        let sample = self.resources.lock().sample(can_bits);
+        sink.write(&vec![sample.can_load as u8])?;
+
+        Ok(())
+    }
 }
 
 impl LogSource for AdcColumns<'_> {
@@ -114,22 +144,34 @@ struct GpsColumns(Option<Fix>);
 
 impl LogSource for GpsColumns {
     fn schema(&self, push: &mut dyn FnMut(&str, ColType)) {
-        push("lat", ColType::F32);
-        push("lon", ColType::F32);
+        push("gps_Lat", ColType::F32);
+        push("gps_Long", ColType::F32);
         push("alt", ColType::F32);
         push("sats", ColType::Raw(1));
-        push("quality", ColType::Raw(1));
+        push("gps_fix", ColType::Raw(1));
+        push("v_car_gps", ColType::F32);
+        push("gps_heading", ColType::F32);
     }
 
     fn write_row(&self, sink: &mut dyn Write) -> io::Result<()> {
-        let (lat, lon, alt_m, sats, quality) = match &self.0 {
-            Some(fix) => (fix.lat, fix.lon, fix.alt_m, fix.sats, fix.quality),
-            None => (0.0, 0.0, 0.0, 0, 0),
+        let (lat, lon, alt_m, sats, quality, speed_kmh, heading_deg) = match &self.0 {
+            Some(fix) => (
+                fix.lat,
+                fix.lon,
+                fix.alt_m,
+                fix.sats,
+                fix.quality,
+                fix.speed_kmh,
+                fix.heading_deg,
+            ),
+            None => (0.0, 0.0, 0.0, 0, 0, 0.0, 0.0),
         };
         sink.write_all(&(lat as f32).to_le_bytes())?;
         sink.write_all(&(lon as f32).to_le_bytes())?;
         sink.write_all(&(alt_m as f32).to_le_bytes())?;
-        sink.write_all(&[sats, quality])
+        sink.write_all(&[sats, quality])?;
+        sink.write_all(&(speed_kmh as f32).to_le_bytes())?;
+        sink.write_all(&(heading_deg as f32).to_le_bytes())
     }
 }
 
@@ -151,25 +193,6 @@ fn configured_can_signals() -> Vec<Signal> {
 
 fn configured_adc_channels() -> Vec<AdcChannel> {
     CONFIGURATION.lock().adc_channels.clone()
-}
-
-/// Per-tick scratch, kept across ticks so the steady state allocates nothing
-#[derive(Default)]
-struct Scratch {
-    can: HashMap<String, Vec<u8>>,
-    adc: HashMap<u8, u16>,
-    row: Vec<u8>,
-}
-
-impl Scratch {
-    /// Copy the latest sensor readings out from under their locks
-    fn refresh(&mut self, state: &State) -> (Option<Fix>, Option<ImuReading>) {
-        self.can.clone_from(&state.sensors.can.lock());
-        self.adc.clone_from(&state.sensors.adc.lock());
-        let gps = state.sensors.gps.lock().clone();
-        let imu = *state.sensors.imu.lock();
-        (gps, imu)
-    }
 }
 
 fn build_schema(sources: &[&dyn LogSource]) -> Schema {
@@ -218,7 +241,7 @@ pub fn spawn_logger(state: Arc<State>) -> bool {
     spawned
 }
 
-const LOG_HZ: u32 = 20;
+const LOG_HZ: u32 = 500;
 const LOG_PERIOD: Duration = Duration::from_micros(1_000_000 / LOG_HZ as u64);
 
 fn logger_thread(state: Arc<State>) -> ! {
@@ -237,7 +260,7 @@ fn logger_thread(state: Arc<State>) -> ! {
         // active tick, and again after a `next_log` roll.
         let mut header_written = false;
 
-        let mut scratch = Scratch::default();
+        let mut row: Vec<u8> = Vec::new();
         let mut next_tick = std::time::Instant::now();
         let mut last_sync = std::time::Instant::now();
 
@@ -260,19 +283,33 @@ fn logger_thread(state: Arc<State>) -> ! {
             }
 
             if state.logging.active.load(Ordering::Relaxed) {
-                let (gps, imu) = scratch.refresh(&state);
-                let sources: [&dyn LogSource; 4] = [
-                    &CanColumns {
-                        signals: &can_signals,
-                        latest: &scratch.can,
-                    },
-                    &AdcColumns {
-                        channels: &adc_channels,
-                        latest: &scratch.adc,
-                    },
-                    &GpsColumns(gps),
-                    &ImuColumns(imu),
-                ];
+                // Sensor locks are held only while header/row are built in memory
+                let (header, built) = {
+                    let gps = state.sensors.gps.lock().clone();
+                    let imu = *state.sensors.imu.lock();
+                    let can_latest = state.sensors.can.lock();
+                    let adc_latest = state.sensors.adc.lock();
+                    let sources: [&dyn LogSource; 5] = [
+                        &CanColumns {
+                            signals: &can_signals,
+                            latest: &can_latest,
+                        },
+                        &AdcColumns {
+                            channels: &adc_channels,
+                            latest: &adc_latest,
+                        },
+                        &GpsColumns(gps),
+                        &ImuColumns(imu),
+                        &DeviceStatusColumns {
+                            status: &state.status,
+                            can_bits: &state.can_bits,
+                            resources: &state.resources,
+                        },
+                    ];
+                    let header = (!header_written).then(|| build_schema(&sources).encode_header());
+                    row.clear();
+                    (header, write_row(&mut row, &sources))
+                };
 
                 // A failed SD write means the card is gone or wedged
                 let write = |data: &[u8]| -> Result<(), EspError> {
@@ -280,16 +317,15 @@ fn logger_thread(state: Arc<State>) -> ! {
                         .inspect_err(|_| state.status.sd.store(false, Ordering::Relaxed))
                 };
 
-                if !header_written {
-                    write(&build_schema(&sources).encode_header())?;
+                if let Some(header) = header {
+                    write(&header)?;
                     header_written = true;
                 }
 
-                scratch.row.clear();
-                if let Err(e) = write_row(&mut scratch.row, &sources) {
+                if let Err(e) = built {
                     log::warn!("failed to build log row: {e}");
                 } else {
-                    write(&scratch.row)?;
+                    write(&row)?;
                     prev_run_wrote = true;
                     state.status.sd.store(true, Ordering::Relaxed);
                 }

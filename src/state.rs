@@ -8,13 +8,14 @@ use crate::resources::ResourceMonitor;
 use crate::status::DeviceStatus;
 use parking_lot::Mutex;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 
 #[derive(Default)]
 pub struct State {
     pub sensors: Sensors,
     pub status: DeviceStatus,
     pub resources: Mutex<ResourceMonitor>,
+    pub can_bits: AtomicU32,
     pub logging: LoggingControl,
     pub ota: Ota,
 }

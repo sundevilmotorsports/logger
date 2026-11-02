@@ -5,6 +5,7 @@
 
 use crate::adc::AdcChannel;
 use crate::can::CanDevice;
+use crate::sd::SdCard;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -29,7 +30,7 @@ pub static CONFIGURATION: LazyLock<Mutex<Configuration>> = LazyLock::new(|| {
 impl Configuration {
     /// Load the config from [`CONFIG_PATH`] on the SD card
     pub fn init() {
-        match fs::read_to_string(CONFIG_PATH) {
+        match SdCard::with_lock(|| fs::read_to_string(CONFIG_PATH)) {
             Ok(json) => {
                 if let Err(e) = Self::load_json(&json) {
                     log::warn!("Failed to parse {CONFIG_PATH}: {e}");
@@ -53,6 +54,6 @@ impl Configuration {
 
     pub fn save() -> std::io::Result<()> {
         let json = Self::json().map_err(std::io::Error::other)?;
-        fs::write(CONFIG_PATH, json)
+        SdCard::with_lock(|| fs::write(CONFIG_PATH, json))
     }
 }

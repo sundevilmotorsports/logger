@@ -24,10 +24,17 @@ pub struct Fix {
     pub sats: u8,
     pub quality: u8,
     pub utc: Option<NaiveDateTime>,
+    pub speed_kmh: f64,
+    pub heading_deg: f64,
 }
 
 /// Most recent RMC date, needed to timestamp GGA's time-only field. Internal to this thread.
 static LATEST_DATE: LazyLock<Mutex<Option<NaiveDate>>> = LazyLock::new(|| Mutex::new(None));
+
+/// Most recent RMC speed (km/h) and true-north course (degrees); like
+/// `LATEST_DATE`, needed because GGA carries the rest of the fix but not
+/// velocity. Internal to this thread.
+static LATEST_VELOCITY: LazyLock<Mutex<(f64, f64)>> = LazyLock::new(|| Mutex::new((0.0, 0.0)));
 
 pub struct Gnss(UartDriver<'static>);
 
@@ -58,6 +65,9 @@ fn poll_loop(driver: UartDriver<'static>, state: Arc<State>) -> ! {
                         let line = line.trim_end_matches('\r');
                         if let Some(date) = parse_rmc_date(line) {
                             *LATEST_DATE.lock() = Some(date);
+                        }
+                        if let Some(velocity) = parse_rmc_velocity(line) {
+                            *LATEST_VELOCITY.lock() = velocity;
                         }
                         if let Some(fix) = parse_gga(line) {
                             *state.sensors.gps.lock() = Some(fix);
@@ -103,6 +113,7 @@ fn parse_gga(line: &str) -> Option<Fix> {
             .lock()
             .map(|date| NaiveDateTime::new(date, time))
     });
+    let (speed_kmh, heading_deg) = *LATEST_VELOCITY.lock();
 
     Some(Fix {
         lat: dm_to_deg(f[2])? * if f[3] == "S" { -1.0 } else { 1.0 },
@@ -111,6 +122,8 @@ fn parse_gga(line: &str) -> Option<Fix> {
         sats: f[7].parse().ok()?,
         quality,
         utc,
+        speed_kmh,
+        heading_deg,
     })
 }
 
@@ -134,6 +147,24 @@ fn parse_rmc_date(line: &str) -> Option<NaiveDate> {
 
     let year = if yy < 80 { 2000 + yy } else { 1900 + yy };
     NaiveDate::from_ymd_opt(year, month, day)
+}
+
+// $GxRMC,time,status,lat,N,lon,E,speed,track,ddmmyy,...*checksum
+// speed is in knots, track is true-north course in degrees; track is
+// commonly blank at very low speed, so it falls back to 0.0 rather than
+// discarding an otherwise-valid speed reading.
+fn parse_rmc_velocity(line: &str) -> Option<(f64, f64)> {
+    let body = checksum_body(line)?;
+    let f: Vec<&str> = body.split(',').collect();
+    if f.len() < 9 || !f[0].ends_with("RMC") {
+        return None;
+    }
+    if f[2] != "A" {
+        return None; // status void, don't trust speed/heading
+    }
+    let speed_knots: f64 = f[7].parse().ok()?;
+    let heading_deg: f64 = f[8].parse().unwrap_or(0.0);
+    Some((speed_knots * 1.852, heading_deg))
 }
 
 // hhmmss.sss -> NaiveTime
