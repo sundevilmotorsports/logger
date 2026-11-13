@@ -55,7 +55,7 @@ fn main() {
     info!("Peripherials");
 
     let mut ldo4 = LdoChannel::new(p.ldo4, &LdoChannelConfig::new(3300)).unwrap();
-    ldo4.adjust_voltage(1800).unwrap();
+    ldo4.adjust_voltage(3300).unwrap();
     unsafe {
         let out = (*esp_idf_svc::sys::__getreent())._stdout as *mut esp_idf_svc::sys::FILE;
         esp_ldo_dump(out);
@@ -92,9 +92,9 @@ fn main() {
 
     let spi3 = SpiDriver::new(
         spi3::Spi3,
-        p.pins.gpio12,
-        p.pins.gpio13,
-        Some(p.pins.gpio14),
+        p.pins.gpio51,
+        p.pins.gpio44, // TODO: change back to 50
+        Some(p.pins.gpio49),
         &SpiDriverConfig::new(),
     )
     .inspect_err(|e| log::error!("engine SPI driver init failed: {e:?}"))
@@ -105,7 +105,7 @@ fn main() {
     }
 
     let can1 = spi.clone().and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio8), &SpiConfig::new())
+        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio48), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN1 SPI device init failed: {e:?}"))
             .ok()?;
         let int_pin = PinDriver::input(p.pins.gpio54, Pull::Up)
@@ -120,7 +120,7 @@ fn main() {
     }
 
     let can2 = spi3.and_then(|spi| {
-        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio48), &SpiConfig::new())
+        let spi_device = SpiDeviceDriver::new(spi, Some(p.pins.gpio8), &SpiConfig::new())
             .inspect_err(|e| log::error!("CAN2 SPI device init failed: {e:?}"))
             .ok()?;
         let int_pin = PinDriver::input(p.pins.gpio52, Pull::Up)

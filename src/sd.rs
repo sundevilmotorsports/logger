@@ -9,9 +9,9 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use esp_idf_svc::fs::fatfs::Fatfs;
-use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio44};
+use esp_idf_svc::hal::gpio::{Gpio39, Gpio40, Gpio41, Gpio42, Gpio43, Gpio50};
 use esp_idf_svc::hal::sd::mmc::{
-    config::Configuration as SdMmcHostConfiguration, SdMmcHostDriver, SDMMC0,
+    config::Configuration as SdMmcHostConfiguration, SdMmcHostDriver, SDMMC1,
 };
 use esp_idf_svc::hal::sd::{SdCardConfiguration, SdCardDriver};
 use esp_idf_svc::io::vfs::MountedFatfs;
@@ -48,12 +48,11 @@ impl SdCard {
     }
 
     fn open() -> Result<Self, EspError> {
-        // Already the default; set explicitly so it is visible here
         let mut host_config = SdMmcHostConfiguration::new();
         host_config.enable_internal_pullups = true;
         let host = SdMmcHostDriver::new_4bits(
-            unsafe { SDMMC0::steal() },
-            unsafe { Gpio44::steal() }, // CMD
+            unsafe { SDMMC1::steal() },
+            unsafe { Gpio50::steal() }, // CMD
             unsafe { Gpio43::steal() }, // CLK
             unsafe { Gpio39::steal() }, // D0
             unsafe { Gpio40::steal() }, // D1

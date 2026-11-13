@@ -21,6 +21,10 @@ esp-idf-sys = { git = "https://github.com/esp-rs/esp-idf.git" }
 esp-idf-hal = { git = "https://github.com/esp-rs/esp-idf.git" }
 esp-idf-svc = { git = "https://github.com/esp-rs/esp-idf.git" }
 
+[features]
+# Replace normal startup with the SD socket wiring test (see src/sd_pin_test.rs)
+sd-pin-test = []
+
 [dependencies]
 base64 = "0.22"
 log = "0.4"
