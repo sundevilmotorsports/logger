@@ -32,6 +32,8 @@ pub struct Signal {
     pub scale: Option<f32>,
     #[serde(default)]
     pub offset: f32,
+    #[serde(default)]
+    pub bit: Option<u8>,
 }
 
 impl Signal {
@@ -42,6 +44,10 @@ impl Signal {
         raw: Option<&[u8]>,
         sink: &mut dyn std::io::Write,
     ) -> std::io::Result<()> {
+        if let Some(bit) = self.bit {
+            let raw = raw.unwrap_or(&[]);
+            return sink.write_all(&[(raw[self.start] >> bit) & 1]);
+        }
         match self.scale {
             Some(scale) => {
                 let n = raw.map(|r| self.raw_int(r)).unwrap_or(0);
