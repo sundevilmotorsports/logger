@@ -45,8 +45,12 @@ impl Signal {
         sink: &mut dyn std::io::Write,
     ) -> std::io::Result<()> {
         if let Some(bit) = self.bit {
-            let raw = raw.unwrap_or(&[]);
-            return sink.write_all(&[(raw[self.start] >> bit) & 1]);
+            let value = raw
+                .and_then(|bytes| bytes.first())
+                .and_then(|byte| byte.checked_shr(u32::from(bit)))
+                .unwrap_or(0)
+                & 1;
+            return sink.write_all(&[value]);
         }
         match self.scale {
             Some(scale) => {
